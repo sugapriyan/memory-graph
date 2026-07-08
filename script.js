@@ -82,6 +82,27 @@ svg.call(d3.zoom().scaleExtent([0.3,2.5]).on('zoom', (e)=> g.attr('transform', e
 let linkSel, nodeSel, linkLabelSel;
 let simulation;
 
+/* ---------- Graph overlay show/hide ---------- */
+
+function refreshGraphDimensions(){
+  width = wrap.clientWidth;
+  height = wrap.clientHeight;
+  svg.attr('viewBox', [0,0,width,height]);
+  if(simulation){
+    simulation.force('center', d3.forceCenter(width/2, height/2));
+    simulation.alpha(0.5).restart();
+  }
+}
+
+function showGraphOverlay(){
+  document.getElementById('graph-overlay').classList.remove('hidden');
+  refreshGraphDimensions();
+}
+
+function hideGraphOverlay(){
+  document.getElementById('graph-overlay').classList.add('hidden');
+}
+
 /* ==========================================================
    Google sign-in (Google Identity Services token client)
    ========================================================== */
@@ -396,7 +417,7 @@ function onNodeClick(d){
   if(linkMode){
     if(!linkSource){
       linkSource = d;
-      document.getElementById('connect-hint').textContent = `Now click another node to link with "${d.label}".`;
+      document.getElementById('connect-hint').textContent = `Now tap another node to link with "${d.label}".`;
     } else if(linkSource.id !== d.id){
       const exists = data.links.some(l =>
         (l.source.id === linkSource.id && l.target.id === d.id) ||
@@ -407,6 +428,7 @@ function onNodeClick(d){
       }
       linkTarget = d;
       document.getElementById('connect-hint').style.display = 'none';
+      hideGraphOverlay();
       const confirmBox = document.getElementById('link-confirm');
       confirmBox.style.display = 'block';
       document.getElementById('link-label-input').value = '';
@@ -415,6 +437,7 @@ function onNodeClick(d){
     return;
   }
   selectNode(d);
+  hideGraphOverlay();
 }
 
 function updateFinanceSummary(){
@@ -482,7 +505,7 @@ function updateSelectionStyles(){
 function updateFilterVisuals(){
   const legend = document.getElementById('legend');
   legend.classList.toggle('filtering', activeFilters.size > 0);
-  legend.querySelectorAll('.legend-item').forEach(item => {
+  legend.querySelectorAll('.legend-chip').forEach(item => {
     item.classList.toggle('active', activeFilters.has(item.dataset.category));
   });
 
@@ -599,6 +622,8 @@ function setupSpeechRecognition(){
 
 document.getElementById('sign-in-btn-main').addEventListener('click', handleSignIn);
 document.getElementById('sign-out-btn').addEventListener('click', handleSignOut);
+document.getElementById('graph-toggle-btn').addEventListener('click', showGraphOverlay);
+document.getElementById('close-graph-btn').addEventListener('click', hideGraphOverlay);
 
 document.getElementById('node-category').addEventListener('change', (e) => {
   document.getElementById('finance-fields').style.display = e.target.value === 'finance' ? 'block' : 'none';
@@ -659,7 +684,8 @@ document.getElementById('connect-btn').addEventListener('click', () => {
   document.getElementById('connect-btn').classList.add('active');
   const hint = document.getElementById('connect-hint');
   hint.style.display = 'block';
-  hint.textContent = `Now click another node to link with "${selectedNode.label}".`;
+  hint.textContent = `Now tap another node to link with "${selectedNode.label}".`;
+  showGraphOverlay();
 });
 
 document.getElementById('confirm-link-btn').addEventListener('click', () => {
@@ -701,7 +727,7 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   render();
 });
 
-document.querySelectorAll('#legend .legend-item').forEach(item => {
+document.querySelectorAll('#legend .legend-chip').forEach(item => {
   item.addEventListener('click', () => {
     const cat = item.dataset.category;
     if(activeFilters.has(cat)) activeFilters.delete(cat);
@@ -711,11 +737,8 @@ document.querySelectorAll('#legend .legend-item').forEach(item => {
 });
 
 window.addEventListener('resize', () => {
-  width = wrap.clientWidth; height = wrap.clientHeight;
-  svg.attr('viewBox', [0,0,width,height]);
-  if(simulation){
-    simulation.force('center', d3.forceCenter(width/2, height/2));
-    simulation.alpha(0.3).restart();
+  if(!document.getElementById('graph-overlay').classList.contains('hidden')){
+    refreshGraphDimensions();
   }
 });
 

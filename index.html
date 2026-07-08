@@ -28,17 +28,14 @@
       <h1>Memory Graph</h1>
       <p>Your career, projects, skills, and the people in your life — one connected map</p>
     </div>
+    <button class="btn-ghost graph-toggle-btn" id="graph-toggle-btn">🕸 View graph</button>
     <div id="auth-area">
       <span id="auth-status"></span>
       <button class="btn-ghost" id="sign-out-btn" style="display:none;">Sign out</button>
     </div>
   </header>
-  <div class="main">
-    <div id="graph-wrap">
-      <svg id="graph"></svg>
-      <div id="save-indicator">Saved</div>
-    </div>
-    <aside>
+  <div class="content-wrap">
+    <aside id="entry-panel">
       <div class="section">
         <h2>Add something</h2>
         <label>What is it?</label>
@@ -102,7 +99,6 @@
         </div>
         <button class="btn-link" id="connect-btn">Connect to another node</button>
         <button class="btn-danger" id="delete-btn">Delete</button>
-        <div class="hint" id="connect-hint" style="display:none;">Now click another node to link it.</div>
         <div id="link-confirm" style="display:none;">
           <label>Relationship (optional)</label>
           <input type="text" id="link-label-input" placeholder="e.g. wife, manager, friend">
@@ -112,24 +108,31 @@
       </div>
 
       <div class="section">
-        <h2>Legend — click to focus</h2>
-        <div class="legend" id="legend">
-          <div class="legend-item" data-category="career"><div class="dot" style="background:var(--career)"></div>Career</div>
-          <div class="legend-item" data-category="project"><div class="dot" style="background:var(--project)"></div>Project</div>
-          <div class="legend-item" data-category="skill"><div class="dot" style="background:var(--skill)"></div>Skill</div>
-          <div class="legend-item" data-category="idea"><div class="dot" style="background:var(--idea)"></div>Idea / Topic</div>
-          <div class="legend-item" data-category="personal"><div class="dot" style="background:var(--personal)"></div>Personal</div>
-          <div class="legend-item" data-category="people"><div class="dot" style="background:var(--people)"></div>Person / Relationship</div>
-          <div class="legend-item" data-category="finance"><div class="dot" style="background:var(--finance)"></div>Investment</div>
-        </div>
-        <div class="hint">Drag nodes to rearrange. Click a node for details. Click a category above to spotlight just that thread — click again to show everything.</div>
-      </div>
-
-      <div class="section">
         <button class="btn-ghost" id="reset-btn">Reset to starting map</button>
         <div class="hint">This clears everything you've added and can't be undone.</div>
       </div>
     </aside>
+  </div>
+
+  <div id="graph-overlay" class="hidden">
+    <div class="overlay-topbar">
+      <button class="btn-ghost overlay-close" id="close-graph-btn">✕ Close</button>
+      <div class="legend-bar" id="legend">
+        <div class="legend-chip" data-category="career"><div class="dot" style="background:var(--career)"></div>Career</div>
+        <div class="legend-chip" data-category="project"><div class="dot" style="background:var(--project)"></div>Project</div>
+        <div class="legend-chip" data-category="skill"><div class="dot" style="background:var(--skill)"></div>Skill</div>
+        <div class="legend-chip" data-category="idea"><div class="dot" style="background:var(--idea)"></div>Idea</div>
+        <div class="legend-chip" data-category="personal"><div class="dot" style="background:var(--personal)"></div>Personal</div>
+        <div class="legend-chip" data-category="people"><div class="dot" style="background:var(--people)"></div>People</div>
+        <div class="legend-chip" data-category="finance"><div class="dot" style="background:var(--finance)"></div>Investment</div>
+      </div>
+    </div>
+    <div class="hint" id="connect-hint" style="display:none;">Now tap another node to link it.</div>
+    <div id="graph-wrap">
+      <svg id="graph"></svg>
+      <div id="save-indicator">Saved</div>
+    </div>
+    <div class="hint overlay-footer-hint">Drag to rearrange · tap a node for details · tap a chip above to spotlight that thread</div>
   </div>
 </div>
 
