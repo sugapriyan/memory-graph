@@ -540,6 +540,7 @@ function exitLinkMode(){
 
 let recognition = null;
 let recognizing = false;
+let manualStop = false;
 let currentLang = 'en-IN';
 
 function setupSpeechRecognition(){
@@ -553,13 +554,17 @@ function setupSpeechRecognition(){
   }
 
   recognition = new SpeechRecognitionImpl();
-  recognition.continuous = true;
+  // continuous mode is unreliable on Android (it can re-fire the same final
+  // result on internal restarts, causing repeated words). Instead we run one
+  // utterance at a time and auto-start the next turn right after — same feel
+  // for the person (just keep talking), but each phrase is captured once.
+  recognition.continuous = false;
   recognition.interimResults = true;
   recognition.lang = currentLang;
 
   recognition.onresult = (event) => {
     let finalTranscript = '';
-    for(let i = event.resultIndex; i < event.results.length; i++){
+    for(let i = 0; i < event.results.length; i++){
       if(event.results[i].isFinal){
         finalTranscript += event.results[i][0].transcript;
       }
@@ -577,17 +582,25 @@ function setupSpeechRecognition(){
   };
 
   recognition.onend = () => {
-    recognizing = false;
-    micBtn.classList.remove('recording');
+    if(recognizing && !manualStop){
+      try{ recognition.start(); }
+      catch(e){ recognizing = false; micBtn.classList.remove('recording'); }
+    } else {
+      recognizing = false;
+      micBtn.classList.remove('recording');
+      if(hint.textContent === 'Listening…') hint.textContent = '';
+    }
   };
 
   recognition.onerror = (event) => {
+    if(event.error === 'no-speech' || event.error === 'aborted'){
+      return; // benign — onend fires right after and decides whether to restart
+    }
+    manualStop = true;
     recognizing = false;
     micBtn.classList.remove('recording');
     if(event.error === 'not-allowed' || event.error === 'permission-denied'){
       hint.textContent = 'Microphone access was blocked — check your browser permissions.';
-    } else if(event.error === 'no-speech'){
-      hint.textContent = "Didn't catch anything — try again.";
     } else {
       hint.textContent = 'Voice input hit an error: ' + event.error;
     }
@@ -596,15 +609,20 @@ function setupSpeechRecognition(){
   micBtn.addEventListener('click', () => {
     if(!selectedNode) return;
     if(recognizing){
+      manualStop = true;
+      recognizing = false;
       recognition.stop();
+      micBtn.classList.remove('recording');
+      hint.textContent = '';
       return;
     }
+    manualStop = false;
+    recognizing = true;
     recognition.lang = currentLang;
     hint.textContent = 'Listening…';
+    micBtn.classList.add('recording');
     try{
       recognition.start();
-      recognizing = true;
-      micBtn.classList.add('recording');
     }catch(e){ /* already started, ignore */ }
   });
 
