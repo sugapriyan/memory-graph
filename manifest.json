@@ -1,0 +1,15 @@
+{
+  "name": "Memory Graph",
+  "short_name": "MemoryGraph",
+  "description": "A personal knowledge graph of your career, projects, skills, and relationships.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FBF8F4",
+  "theme_color": "#FBF8F4",
+  "orientation": "any",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

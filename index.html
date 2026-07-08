@@ -1,1 +1,140 @@
-<h1>Memory Graph — coming soon</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FBF8F4">
+<title>Memory Graph</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="signin-overlay">
+  <h2>Memory Graph</h2>
+  <p>Your career, projects, skills, and the people in your life — stored as a single file in your own Google Drive. Sign in to load it.</p>
+  <button id="sign-in-btn-main">Sign in with Google</button>
+  <div id="signin-loading" style="display:none;" class="spinner"></div>
+  <div id="signin-error"></div>
+</div>
+
+<div id="app" style="display:none;">
+  <header>
+    <div>
+      <h1>Memory Graph</h1>
+      <p>Your career, projects, skills, and the people in your life — one connected map</p>
+    </div>
+    <div id="auth-area">
+      <span id="auth-status"></span>
+      <button class="btn-ghost" id="sign-out-btn" style="display:none;">Sign out</button>
+    </div>
+  </header>
+  <div class="main">
+    <div id="graph-wrap">
+      <svg id="graph"></svg>
+      <div id="save-indicator">Saved</div>
+    </div>
+    <aside>
+      <div class="section">
+        <h2>Add something</h2>
+        <label>What is it?</label>
+        <input type="text" id="node-label" placeholder="e.g. Kite Connect API">
+        <label>Category</label>
+        <select id="node-category">
+          <option value="career">Career</option>
+          <option value="project">Project</option>
+          <option value="skill">Skill</option>
+          <option value="idea">Idea / Topic</option>
+          <option value="personal">Personal</option>
+          <option value="people">Person / Relationship</option>
+          <option value="finance">Investment</option>
+        </select>
+        <div id="finance-fields" style="display:none;">
+          <div class="field-row">
+            <div>
+              <label>Amount invested (₹)</label>
+              <input type="text" id="node-invested" placeholder="e.g. 50000">
+            </div>
+            <div>
+              <label>Current value (₹)</label>
+              <input type="text" id="node-current" placeholder="e.g. 58000">
+            </div>
+          </div>
+        </div>
+        <button class="btn-primary" id="add-node-btn">Add to my graph</button>
+      </div>
+
+      <div class="section" id="finance-summary-section" style="display:none;">
+        <h2>Investment summary</h2>
+        <div id="finance-summary"></div>
+      </div>
+
+      <div class="section" id="details-section" style="display:none;">
+        <h2>Selected</h2>
+        <div class="node-title" id="detail-title"></div>
+        <div class="node-cat" id="detail-cat"></div>
+        <label>Notes</label>
+        <textarea id="detail-note" placeholder="Add a note... or use the mic"></textarea>
+        <div class="voice-row">
+          <button type="button" class="mic-btn" id="mic-btn" title="Speak your note" aria-label="Speak your note">🎙</button>
+          <div class="lang-toggle">
+            <div class="lang-pill active" data-lang="en-IN" id="lang-en">English (India)</div>
+            <div class="lang-pill" data-lang="ta-IN" id="lang-ta">தமிழ்</div>
+          </div>
+        </div>
+        <div class="voice-hint" id="voice-hint"></div>
+        <div id="detail-finance" style="display:none;">
+          <div class="field-row">
+            <div>
+              <label>Amount invested (₹)</label>
+              <input type="text" id="detail-invested" placeholder="e.g. 50000">
+            </div>
+            <div>
+              <label>Current value (₹)</label>
+              <input type="text" id="detail-current" placeholder="e.g. 58000">
+            </div>
+          </div>
+          <div id="return-badge"></div>
+        </div>
+        <button class="btn-link" id="connect-btn">Connect to another node</button>
+        <button class="btn-danger" id="delete-btn">Delete</button>
+        <div class="hint" id="connect-hint" style="display:none;">Now click another node to link it.</div>
+        <div id="link-confirm" style="display:none;">
+          <label>Relationship (optional)</label>
+          <input type="text" id="link-label-input" placeholder="e.g. wife, manager, friend">
+          <button class="btn-primary" id="confirm-link-btn">Add connection</button>
+          <button class="btn-ghost" id="cancel-link-btn">Cancel</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Legend — click to focus</h2>
+        <div class="legend" id="legend">
+          <div class="legend-item" data-category="career"><div class="dot" style="background:var(--career)"></div>Career</div>
+          <div class="legend-item" data-category="project"><div class="dot" style="background:var(--project)"></div>Project</div>
+          <div class="legend-item" data-category="skill"><div class="dot" style="background:var(--skill)"></div>Skill</div>
+          <div class="legend-item" data-category="idea"><div class="dot" style="background:var(--idea)"></div>Idea / Topic</div>
+          <div class="legend-item" data-category="personal"><div class="dot" style="background:var(--personal)"></div>Personal</div>
+          <div class="legend-item" data-category="people"><div class="dot" style="background:var(--people)"></div>Person / Relationship</div>
+          <div class="legend-item" data-category="finance"><div class="dot" style="background:var(--finance)"></div>Investment</div>
+        </div>
+        <div class="hint">Drag nodes to rearrange. Click a node for details. Click a category above to spotlight just that thread — click again to show everything.</div>
+      </div>
+
+      <div class="section">
+        <button class="btn-ghost" id="reset-btn">Reset to starting map</button>
+        <div class="hint">This clears everything you've added and can't be undone.</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="script.js"></script>
+</body>
+</html>
