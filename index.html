@@ -38,31 +38,39 @@
     <aside id="entry-panel">
       <div class="section">
         <h2>Add something</h2>
-        <label>What is it?</label>
-        <input type="text" id="node-label" placeholder="e.g. Kite Connect API">
-        <label>Category</label>
-        <select id="node-category">
-          <option value="career">Career</option>
-          <option value="project">Project</option>
-          <option value="skill">Skill</option>
-          <option value="idea">Idea / Topic</option>
-          <option value="personal">Personal</option>
-          <option value="people">Person / Relationship</option>
-          <option value="finance">Investment</option>
-        </select>
-        <div id="finance-fields" style="display:none;">
-          <div class="field-row">
-            <div>
-              <label>Amount invested (₹)</label>
-              <input type="text" id="node-invested" placeholder="e.g. 50000">
-            </div>
-            <div>
-              <label>Current value (₹)</label>
-              <input type="text" id="node-current" placeholder="e.g. 58000">
-            </div>
+
+        <div id="add-step-category">
+          <label>Choose a category</label>
+          <div class="category-grid" id="category-grid">
+            <button type="button" class="category-card" data-category="career"><span class="cat-dot" style="background:var(--career)"></span>Career</button>
+            <button type="button" class="category-card" data-category="project"><span class="cat-dot" style="background:var(--project)"></span>Project</button>
+            <button type="button" class="category-card" data-category="skill"><span class="cat-dot" style="background:var(--skill)"></span>Skill</button>
+            <button type="button" class="category-card" data-category="idea"><span class="cat-dot" style="background:var(--idea)"></span>Idea / Topic</button>
+            <button type="button" class="category-card" data-category="personal"><span class="cat-dot" style="background:var(--personal)"></span>Personal</button>
+            <button type="button" class="category-card" data-category="people"><span class="cat-dot" style="background:var(--people)"></span>Person / Relationship</button>
+            <button type="button" class="category-card" data-category="finance"><span class="cat-dot" style="background:var(--finance)"></span>Investment</button>
           </div>
         </div>
-        <button class="btn-primary" id="add-node-btn">Add to my graph</button>
+
+        <div id="add-step-details" style="display:none;">
+          <button type="button" class="btn-link add-back-btn" id="add-back-btn">‹ Change category</button>
+          <div class="chosen-category-badge" id="chosen-category-badge"></div>
+          <label>What is it?</label>
+          <input type="text" id="node-label" placeholder="e.g. Kite Connect API">
+          <div id="finance-fields" style="display:none;">
+            <div class="field-row">
+              <div>
+                <label>Amount invested (₹)</label>
+                <input type="text" id="node-invested" placeholder="e.g. 50000">
+              </div>
+              <div>
+                <label>Current value (₹)</label>
+                <input type="text" id="node-current" placeholder="e.g. 58000">
+              </div>
+            </div>
+          </div>
+          <button class="btn-primary" id="add-node-btn">Save to my graph</button>
+        </div>
       </div>
 
       <div class="section" id="finance-summary-section" style="display:none;">
@@ -97,6 +105,8 @@
           </div>
           <div id="return-badge"></div>
         </div>
+        <button class="btn-primary" id="save-detail-btn">Save changes</button>
+        <div class="save-hint" id="detail-dirty-hint"></div>
         <button class="btn-link" id="connect-btn">Connect to another node</button>
         <button class="btn-danger" id="delete-btn">Delete</button>
         <div id="link-confirm" style="display:none;">

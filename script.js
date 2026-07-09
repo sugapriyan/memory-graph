@@ -16,6 +16,15 @@ const CATEGORY_COLOR_HEX = {
   people: '#F3AC8E',
   finance: '#AEDCA6'
 };
+const CATEGORY_LABELS = {
+  career: 'Career',
+  project: 'Project',
+  skill: 'Skill',
+  idea: 'Idea / Topic',
+  personal: 'Personal',
+  people: 'Person / Relationship',
+  finance: 'Investment'
+};
 
 function seedData(){
   return {
@@ -61,6 +70,9 @@ let linkMode = false;
 let linkSource = null;
 let linkTarget = null;
 let activeFilters = new Set();
+let newNodeCategory = null;   // category chosen in step 1 of the add-node flow
+let isDirty = false;          // true when the selected node has unsaved edits
+let savedSnapshot = null;     // last-saved {note, invested, current} for the selected node
 
 /* ---------- Auth state ---------- */
 let tokenClient = null;
@@ -195,6 +207,8 @@ function handleSignOut(){
   driveFolderId = null;
   data = null;
   selectedNode = null;
+  savedSnapshot = null;
+  clearDirty();
   document.getElementById('app').style.display = 'none';
   document.getElementById('signin-overlay').classList.remove('hidden');
   document.getElementById('sign-in-btn-main').style.display = 'inline-block';
@@ -282,8 +296,9 @@ async function updateDriveFile(fileId, content){
 
 /* ---------- Load / persist, always reading fresh from Drive ---------- */
 
-function showSaved(){
+function showSaved(msg){
   const el = document.getElementById('save-indicator');
+  el.textContent = msg || 'Saved';
   el.style.opacity = 1;
   clearTimeout(showSaved._t);
   showSaved._t = setTimeout(() => el.style.opacity = 0, 900);
@@ -407,8 +422,19 @@ function dragended(event, d){
 }
 
 svg.on('click', () => {
-  if(linkMode){ exitLinkMode(); }
+  if(linkMode){ exitLinkMode(); return; }
+  if(selectedNode && isDirty){
+    const discard = window.confirm(`You have unsaved changes to "${selectedNode.label}". Discard them and close?`);
+    if(!discard) return;
+    if(savedSnapshot){
+      selectedNode.note = savedSnapshot.note;
+      selectedNode.invested = savedSnapshot.invested;
+      selectedNode.current = savedSnapshot.current;
+    }
+  }
   selectedNode = null;
+  savedSnapshot = null;
+  clearDirty();
   document.getElementById('details-section').style.display = 'none';
   updateSelectionStyles();
 });
@@ -436,8 +462,8 @@ function onNodeClick(d){
     }
     return;
   }
-  selectNode(d);
-  hideGraphOverlay();
+  const switched = selectNode(d);
+  if(switched !== false) hideGraphOverlay();
 }
 
 function updateFinanceSummary(){
@@ -463,8 +489,37 @@ function updateFinanceSummary(){
   box.querySelector('.summary-row.total').classList.add(colorClass);
 }
 
+function snapshotNode(d){
+  return { note: d.note || '', invested: d.invested ?? null, current: d.current ?? null };
+}
+
+function markDirty(){
+  isDirty = true;
+  document.getElementById('save-detail-btn').classList.add('dirty');
+  document.getElementById('detail-dirty-hint').textContent = 'Unsaved changes';
+}
+
+function clearDirty(){
+  isDirty = false;
+  document.getElementById('save-detail-btn').classList.remove('dirty');
+  document.getElementById('detail-dirty-hint').textContent = '';
+}
+
+// Returns false if the switch was blocked (unsaved changes, user chose to keep editing).
 function selectNode(d){
+  if(selectedNode && d.id !== selectedNode.id && isDirty){
+    const discard = window.confirm(`You have unsaved changes to "${selectedNode.label}". Discard them and switch?`);
+    if(!discard) return false;
+    // revert the in-place mutations on the previously-selected node back to last-saved values
+    if(savedSnapshot){
+      selectedNode.note = savedSnapshot.note;
+      selectedNode.invested = savedSnapshot.invested;
+      selectedNode.current = savedSnapshot.current;
+    }
+  }
   selectedNode = d;
+  savedSnapshot = snapshotNode(d);
+  clearDirty();
   if(recognizing && recognition){ recognition.stop(); }
   document.getElementById('voice-hint').textContent = '';
   document.getElementById('details-section').style.display = 'block';
@@ -481,6 +536,7 @@ function selectNode(d){
     financeBox.style.display = 'none';
   }
   updateSelectionStyles();
+  return true;
 }
 
 function updateReturnBadge(d){
@@ -576,8 +632,7 @@ function setupSpeechRecognition(){
       const updated = existing + sep + finalTranscript.trim() + ' ';
       noteBox.value = updated;
       selectedNode.note = updated;
-      data.nodes = data.nodes.map(n => n.id === selectedNode.id ? selectedNode : n);
-      persist();
+      markDirty();
     }
   };
 
@@ -613,7 +668,7 @@ function setupSpeechRecognition(){
       recognizing = false;
       recognition.stop();
       micBtn.classList.remove('recording');
-      hint.textContent = '';
+      hint.textContent = isDirty ? 'Tap "Save changes" below to keep this.' : '';
       return;
     }
     manualStop = false;
@@ -643,15 +698,31 @@ document.getElementById('sign-out-btn').addEventListener('click', handleSignOut)
 document.getElementById('graph-toggle-btn').addEventListener('click', showGraphOverlay);
 document.getElementById('close-graph-btn').addEventListener('click', hideGraphOverlay);
 
-document.getElementById('node-category').addEventListener('change', (e) => {
-  document.getElementById('finance-fields').style.display = e.target.value === 'finance' ? 'block' : 'none';
+function goToAddStep1(){
+  newNodeCategory = null;
+  document.getElementById('add-step-details').style.display = 'none';
+  document.getElementById('add-step-category').style.display = 'block';
+}
+
+document.querySelectorAll('.category-card').forEach(card => {
+  card.addEventListener('click', () => {
+    newNodeCategory = card.dataset.category;
+    document.getElementById('add-step-category').style.display = 'none';
+    document.getElementById('add-step-details').style.display = 'block';
+    const badge = document.getElementById('chosen-category-badge');
+    badge.innerHTML = `<span class="cat-dot" style="background:${CATEGORY_COLOR_HEX[newNodeCategory]}"></span>${CATEGORY_LABELS[newNodeCategory]}`;
+    document.getElementById('finance-fields').style.display = newNodeCategory === 'finance' ? 'block' : 'none';
+    document.getElementById('node-label').focus();
+  });
 });
+
+document.getElementById('add-back-btn').addEventListener('click', goToAddStep1);
 
 document.getElementById('add-node-btn').addEventListener('click', () => {
   const labelInput = document.getElementById('node-label');
   const label = labelInput.value.trim();
-  if(!label || !data) return;
-  const category = document.getElementById('node-category').value;
+  if(!label || !data || !newNodeCategory) return;
+  const category = newNodeCategory;
   const id = 'n-' + Date.now();
   const node = {id, label, category, note:'', x: width/2 + (Math.random()-0.5)*100, y: height/2 + (Math.random()-0.5)*100};
   if(category === 'finance'){
@@ -666,33 +737,41 @@ document.getElementById('add-node-btn').addEventListener('click', () => {
   labelInput.value = '';
   persist();
   render();
+  showSaved('Added');
+  goToAddStep1();
 });
 
+// Typing/speaking here only updates the screen — nothing reaches Drive until "Save changes" is tapped.
 document.getElementById('detail-note').addEventListener('input', (e) => {
   if(!selectedNode) return;
   selectedNode.note = e.target.value;
-  data.nodes = data.nodes.map(n => n.id === selectedNode.id ? selectedNode : n);
-  persist();
+  markDirty();
 });
 
 document.getElementById('detail-invested').addEventListener('input', (e) => {
   if(!selectedNode) return;
   const val = parseFloat(e.target.value);
   selectedNode.invested = isNaN(val) ? null : val;
-  data.nodes = data.nodes.map(n => n.id === selectedNode.id ? selectedNode : n);
   updateReturnBadge(selectedNode);
   updateFinanceSummary();
-  persist();
+  markDirty();
 });
 
 document.getElementById('detail-current').addEventListener('input', (e) => {
   if(!selectedNode) return;
   const val = parseFloat(e.target.value);
   selectedNode.current = isNaN(val) ? null : val;
-  data.nodes = data.nodes.map(n => n.id === selectedNode.id ? selectedNode : n);
   updateReturnBadge(selectedNode);
   updateFinanceSummary();
+  markDirty();
+});
+
+document.getElementById('save-detail-btn').addEventListener('click', () => {
+  if(!selectedNode) return;
+  savedSnapshot = snapshotNode(selectedNode);
+  clearDirty();
   persist();
+  showSaved('Saved changes');
 });
 
 document.getElementById('connect-btn').addEventListener('click', () => {
@@ -730,6 +809,8 @@ document.getElementById('delete-btn').addEventListener('click', () => {
     return s !== id && t !== id;
   });
   selectedNode = null;
+  savedSnapshot = null;
+  clearDirty();
   document.getElementById('details-section').style.display = 'none';
   persist();
   render();
@@ -737,10 +818,14 @@ document.getElementById('delete-btn').addEventListener('click', () => {
 
 document.getElementById('reset-btn').addEventListener('click', () => {
   if(!data) return;
+  if(isDirty && !window.confirm('You have unsaved changes that will be lost. Reset anyway?')) return;
   data = seedData();
   selectedNode = null;
+  savedSnapshot = null;
+  clearDirty();
   activeFilters = new Set();
   document.getElementById('details-section').style.display = 'none';
+  goToAddStep1();
   persist();
   render();
 });
@@ -757,6 +842,13 @@ document.querySelectorAll('#legend .legend-chip').forEach(item => {
 window.addEventListener('resize', () => {
   if(!document.getElementById('graph-overlay').classList.contains('hidden')){
     refreshGraphDimensions();
+  }
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if(isDirty){
+    e.preventDefault();
+    e.returnValue = '';
   }
 });
 
