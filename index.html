@@ -39,6 +39,7 @@
     <aside id="home-screen">
       <div class="section home-actions">
         <button type="button" class="btn-primary home-tile" id="open-add-btn">➕ Add something</button>
+        <button type="button" class="btn-ghost home-tile" id="open-ask-btn">🔍 Ask your graph</button>
         <button type="button" class="btn-ghost home-tile" id="open-graph-btn">🕸 View graph</button>
       </div>
 
@@ -91,6 +92,14 @@
             </div>
           </div>
         </div>
+        <label>Connect to</label>
+        <select id="node-link-target">
+          <option value="">— none —</option>
+        </select>
+        <div id="add-link-relationship-wrap" style="display:none;">
+          <label>Relationship</label>
+          <input type="text" id="node-link-label" placeholder="e.g. wife, daughter, manager">
+        </div>
         <button class="btn-primary" id="add-node-btn">Save to my graph</button>
       </div>
     </div>
@@ -138,6 +147,21 @@
         <button class="btn-primary" id="confirm-link-btn">Add connection</button>
         <button class="btn-ghost" id="cancel-link-btn">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ===================== ASK YOUR GRAPH ===================== -->
+  <div id="ask-screen" class="overlay-screen hidden">
+    <div class="overlay-topbar">
+      <button type="button" class="btn-ghost overlay-close" id="ask-home-btn">‹ Home</button>
+      <div class="overlay-title">Ask your graph</div>
+    </div>
+    <div class="overlay-body">
+      <label>Ask something</label>
+      <input type="text" id="ask-input" placeholder="e.g. who is my wife, what do I know about TANCAM">
+      <button class="btn-primary" id="ask-btn">Search</button>
+      <div class="hint">This searches your own notes and connections directly — it's a smart search, not a chatbot. Try a name, a category, or a relationship word like "wife" or "manager".</div>
+      <div id="ask-results"></div>
     </div>
   </div>
 

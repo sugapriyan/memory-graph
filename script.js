@@ -130,6 +130,8 @@ function refreshGraphDimensions(){
   svg.attr('viewBox', [0,0,width,height]);
   if(simulation){
     simulation.force('center', d3.forceCenter(width/2, height/2));
+    simulation.force('x', d3.forceX(width/2).strength(0.045));
+    simulation.force('y', d3.forceY(height/2).strength(0.045));
     simulation.alpha(0.5).restart();
   }
 }
@@ -137,6 +139,7 @@ function refreshGraphDimensions(){
 function applyOverlayVisibility(){
   document.getElementById('add-screen').classList.toggle('hidden', currentOverlay !== 'add');
   document.getElementById('node-screen').classList.toggle('hidden', currentOverlay !== 'node');
+  document.getElementById('ask-screen').classList.toggle('hidden', currentOverlay !== 'ask');
   document.getElementById('graph-overlay').classList.toggle('hidden', currentOverlay !== 'graph');
   if(currentOverlay === 'graph') refreshGraphDimensions();
 }
@@ -410,8 +413,10 @@ function render(){
 
   simulation = d3.forceSimulation(data.nodes)
     .force('link', d3.forceLink(data.links).id(d=>d.id).distance(112).strength(0.6))
-    .force('charge', d3.forceManyBody().strength(-320))
+    .force('charge', d3.forceManyBody().strength(-260))
     .force('center', d3.forceCenter(width/2, height/2))
+    .force('x', d3.forceX(width/2).strength(0.045))
+    .force('y', d3.forceY(height/2).strength(0.045))
     .force('collide', d3.forceCollide(44));
 
   linkSel = g.append('g').selectAll('line')
@@ -531,6 +536,100 @@ function onNodeClick(d){
   }
   const switched = selectNode(d);
   if(switched !== false) openScreen('node');
+}
+
+/* ==========================================================
+   Ask your graph — local keyword search over nodes, notes,
+   categories and relationship links. Not a chatbot: it scores
+   and surfaces matching parts of the graph rather than
+   generating free-form text, so it works fully offline and
+   never sends notes anywhere.
+   ========================================================== */
+
+const ASK_STOPWORDS = new Set([
+  'a','an','the','is','are','was','were','who','what','when','where','why','how',
+  'do','does','did','my','me','i','of','in','on','at','to','for','and','or',
+  'about','tell','know','with','have','has','you','your','it','this','that'
+]);
+
+function tokenizeAsk(str){
+  return (String(str || '').toLowerCase().match(/[a-z0-9\u0B80-\u0BFF]+/g) || []);
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+// nodeId -> list of { label, otherLabel, otherId } covering both directions of every link.
+function buildRelationshipIndex(){
+  const index = {};
+  data.links.forEach(l => {
+    const sId = (l.source && l.source.id) || l.source;
+    const tId = (l.target && l.target.id) || l.target;
+    const sNode = data.nodes.find(n => n.id === sId);
+    const tNode = data.nodes.find(n => n.id === tId);
+    if(!sNode || !tNode) return;
+    (index[sId] = index[sId] || []).push({ label: l.label, otherLabel: tNode.label, otherId: tId });
+    (index[tId] = index[tId] || []).push({ label: l.label, otherLabel: sNode.label, otherId: sId });
+  });
+  return index;
+}
+
+function runAsk(query){
+  const resultsBox = document.getElementById('ask-results');
+  const terms = tokenizeAsk(query).filter(t => t.length > 1 && !ASK_STOPWORDS.has(t));
+
+  if(!data || terms.length === 0){
+    resultsBox.innerHTML = '<div class="empty">Type a name, category, or relationship word — like a person\'s name, "wife", or a project name.</div>';
+    return;
+  }
+
+  const relIndex = buildRelationshipIndex();
+
+  const scored = data.nodes.map(node => {
+    let score = 0;
+    const labelLower = node.label.toLowerCase();
+    const noteLower = (node.note || '').toLowerCase();
+    const catLabel = (CATEGORY_LABELS[node.category] || '').toLowerCase();
+    const rels = relIndex[node.id] || [];
+
+    terms.forEach(t => {
+      if(labelLower.includes(t)) score += 4;
+      if(catLabel.includes(t)) score += 2;
+      if(noteLower.includes(t)) score += 1;
+      rels.forEach(r => {
+        if(r.label && r.label.toLowerCase().includes(t)) score += 5;
+        if(r.otherLabel.toLowerCase().includes(t)) score += 2;
+      });
+    });
+    return { node, score, rels };
+  })
+  .filter(r => r.score > 0)
+  .sort((a, b) => b.score - a.score)
+  .slice(0, 6);
+
+  if(scored.length === 0){
+    resultsBox.innerHTML = '<div class="empty">No matches in your graph yet for that. Try different words, or add more notes and connections.</div>';
+    return;
+  }
+
+  resultsBox.innerHTML = scored.map(r => {
+    const relLines = r.rels.map(rel => {
+      const verb = rel.label ? escapeHtml(rel.label) : 'connected to';
+      return `<div class="ask-rel">${verb} — ${escapeHtml(rel.otherLabel)}</div>`;
+    }).join('');
+    return `
+      <div class="ask-result">
+        <div class="ask-result-head">
+          <span class="seal-dot cat-${r.node.category}"></span>
+          <span class="ask-result-title">${escapeHtml(r.node.label)}</span>
+        </div>
+        <div class="node-cat">${escapeHtml(CATEGORY_LABELS[r.node.category] || r.node.category)}</div>
+        ${r.node.note ? `<div class="ask-result-note">${escapeHtml(r.node.note)}</div>` : ''}
+        ${relLines}
+      </div>
+    `;
+  }).join('');
 }
 
 function updateFinanceSummary(){
@@ -773,11 +872,54 @@ document.getElementById('add-home-btn').addEventListener('click', () => history.
 
 document.getElementById('node-home-btn').addEventListener('click', () => history.back());
 
+document.getElementById('open-ask-btn').addEventListener('click', () => {
+  document.getElementById('ask-results').innerHTML = '';
+  document.getElementById('ask-input').value = '';
+  openScreen('ask');
+  document.getElementById('ask-input').focus();
+});
+document.getElementById('ask-home-btn').addEventListener('click', () => history.back());
+document.getElementById('ask-btn').addEventListener('click', () => runAsk(document.getElementById('ask-input').value));
+document.getElementById('ask-input').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); runAsk(e.target.value); }
+});
+
 function goToAddStep1(){
   newNodeCategory = null;
   document.getElementById('add-step-details').style.display = 'none';
   document.getElementById('add-step-category').style.display = 'block';
 }
+
+// The root node representing the person themselves — seedData always creates it
+// as id 'you', and there is currently no way to delete it from the app.
+function findYouNodeId(){
+  if(!data) return null;
+  const you = data.nodes.find(n => n.id === 'you');
+  return you ? you.id : null;
+}
+
+// Rebuilds the "Connect to" dropdown from the current graph so newly-added nodes
+// can be bonded to an existing one right away, instead of needing a separate trip
+// through "Connect to another node" afterward. Person/Relationship nodes default
+// to the root "you" node — that's the automatic bond for family/relationship
+// entries like a spouse or child — but any category can connect to anything.
+function populateLinkTargetOptions(preferredId){
+  const select = document.getElementById('node-link-target');
+  select.innerHTML = '<option value="">— none —</option>';
+  if(!data) return;
+  data.nodes.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n.id;
+    opt.textContent = n.label;
+    select.appendChild(opt);
+  });
+  select.value = (preferredId && data.nodes.some(n => n.id === preferredId)) ? preferredId : '';
+  document.getElementById('add-link-relationship-wrap').style.display = select.value ? 'block' : 'none';
+}
+
+document.getElementById('node-link-target').addEventListener('change', (e) => {
+  document.getElementById('add-link-relationship-wrap').style.display = e.target.value ? 'block' : 'none';
+});
 
 document.querySelectorAll('.category-card').forEach(card => {
   card.addEventListener('click', () => {
@@ -787,6 +929,7 @@ document.querySelectorAll('.category-card').forEach(card => {
     const badge = document.getElementById('chosen-category-badge');
     badge.innerHTML = `<span class="seal-dot cat-${newNodeCategory}"></span>${CATEGORY_LABELS[newNodeCategory]}`;
     document.getElementById('finance-fields').style.display = newNodeCategory === 'finance' ? 'block' : 'none';
+    populateLinkTargetOptions(newNodeCategory === 'people' ? findYouNodeId() : null);
     document.getElementById('node-label').focus();
   });
 });
@@ -809,7 +952,15 @@ document.getElementById('add-node-btn').addEventListener('click', () => {
     document.getElementById('node-current').value = '';
   }
   data.nodes.push(node);
+
+  const linkTargetId = document.getElementById('node-link-target').value;
+  if(linkTargetId){
+    const relLabel = document.getElementById('node-link-label').value.trim();
+    data.links.push({ source: id, target: linkTargetId, label: relLabel });
+  }
+
   labelInput.value = '';
+  document.getElementById('node-link-label').value = '';
   persist();
   render();
   showSaved('Added');
