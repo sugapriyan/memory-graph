@@ -9,7 +9,7 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -28,93 +28,23 @@
       <h1>Memory Graph</h1>
       <p>Your career, projects, skills, and the people in your life — one connected map</p>
     </div>
-    <button class="btn-ghost graph-toggle-btn" id="graph-toggle-btn">🕸 View graph</button>
     <div id="auth-area">
       <span id="auth-status"></span>
       <button class="btn-ghost" id="sign-out-btn" style="display:none;">Sign out</button>
     </div>
   </header>
+
+  <!-- ===================== HOME ===================== -->
   <div class="content-wrap">
-    <aside id="entry-panel">
-      <div class="section">
-        <h2>Add something</h2>
-
-        <div id="add-step-category">
-          <label>Choose a category</label>
-          <div class="category-grid" id="category-grid">
-            <button type="button" class="category-card" data-category="career"><span class="cat-dot" style="background:var(--career)"></span>Career</button>
-            <button type="button" class="category-card" data-category="project"><span class="cat-dot" style="background:var(--project)"></span>Project</button>
-            <button type="button" class="category-card" data-category="skill"><span class="cat-dot" style="background:var(--skill)"></span>Skill</button>
-            <button type="button" class="category-card" data-category="idea"><span class="cat-dot" style="background:var(--idea)"></span>Idea / Topic</button>
-            <button type="button" class="category-card" data-category="personal"><span class="cat-dot" style="background:var(--personal)"></span>Personal</button>
-            <button type="button" class="category-card" data-category="people"><span class="cat-dot" style="background:var(--people)"></span>Person / Relationship</button>
-            <button type="button" class="category-card" data-category="finance"><span class="cat-dot" style="background:var(--finance)"></span>Investment</button>
-          </div>
-        </div>
-
-        <div id="add-step-details" style="display:none;">
-          <button type="button" class="btn-link add-back-btn" id="add-back-btn">‹ Change category</button>
-          <div class="chosen-category-badge" id="chosen-category-badge"></div>
-          <label>What is it?</label>
-          <input type="text" id="node-label" placeholder="e.g. Kite Connect API">
-          <div id="finance-fields" style="display:none;">
-            <div class="field-row">
-              <div>
-                <label>Amount invested (₹)</label>
-                <input type="text" id="node-invested" placeholder="e.g. 50000">
-              </div>
-              <div>
-                <label>Current value (₹)</label>
-                <input type="text" id="node-current" placeholder="e.g. 58000">
-              </div>
-            </div>
-          </div>
-          <button class="btn-primary" id="add-node-btn">Save to my graph</button>
-        </div>
+    <aside id="home-screen">
+      <div class="section home-actions">
+        <button type="button" class="btn-primary home-tile" id="open-add-btn">➕ Add something</button>
+        <button type="button" class="btn-ghost home-tile" id="open-graph-btn">🕸 View graph</button>
       </div>
 
       <div class="section" id="finance-summary-section" style="display:none;">
         <h2>Investment summary</h2>
         <div id="finance-summary"></div>
-      </div>
-
-      <div class="section" id="details-section" style="display:none;">
-        <h2>Selected</h2>
-        <div class="node-title" id="detail-title"></div>
-        <div class="node-cat" id="detail-cat"></div>
-        <label>Notes</label>
-        <textarea id="detail-note" placeholder="Add a note... or use the mic"></textarea>
-        <div class="voice-row">
-          <button type="button" class="mic-btn" id="mic-btn" title="Speak your note" aria-label="Speak your note">🎙</button>
-          <div class="lang-toggle">
-            <div class="lang-pill active" data-lang="en-IN" id="lang-en">English (India)</div>
-            <div class="lang-pill" data-lang="ta-IN" id="lang-ta">தமிழ்</div>
-          </div>
-        </div>
-        <div class="voice-hint" id="voice-hint"></div>
-        <div id="detail-finance" style="display:none;">
-          <div class="field-row">
-            <div>
-              <label>Amount invested (₹)</label>
-              <input type="text" id="detail-invested" placeholder="e.g. 50000">
-            </div>
-            <div>
-              <label>Current value (₹)</label>
-              <input type="text" id="detail-current" placeholder="e.g. 58000">
-            </div>
-          </div>
-          <div id="return-badge"></div>
-        </div>
-        <button class="btn-primary" id="save-detail-btn">Save changes</button>
-        <div class="save-hint" id="detail-dirty-hint"></div>
-        <button class="btn-link" id="connect-btn">Connect to another node</button>
-        <button class="btn-danger" id="delete-btn">Delete</button>
-        <div id="link-confirm" style="display:none;">
-          <label>Relationship (optional)</label>
-          <input type="text" id="link-label-input" placeholder="e.g. wife, manager, friend">
-          <button class="btn-primary" id="confirm-link-btn">Add connection</button>
-          <button class="btn-ghost" id="cancel-link-btn">Cancel</button>
-        </div>
       </div>
 
       <div class="section">
@@ -124,17 +54,105 @@
     </aside>
   </div>
 
-  <div id="graph-overlay" class="hidden">
+  <!-- ===================== ADD SOMETHING ===================== -->
+  <div id="add-screen" class="overlay-screen hidden">
     <div class="overlay-topbar">
-      <button class="btn-ghost overlay-close" id="close-graph-btn">✕ Close</button>
+      <button type="button" class="btn-ghost overlay-close" id="add-home-btn">‹ Home</button>
+      <div class="overlay-title">Add something</div>
+    </div>
+    <div class="overlay-body">
+      <div id="add-step-category">
+        <label>Choose a category</label>
+        <div class="category-grid" id="category-grid">
+          <button type="button" class="category-card" data-category="career"><span class="seal-dot cat-career"></span>Career</button>
+          <button type="button" class="category-card" data-category="project"><span class="seal-dot cat-project"></span>Project</button>
+          <button type="button" class="category-card" data-category="skill"><span class="seal-dot cat-skill"></span>Skill</button>
+          <button type="button" class="category-card" data-category="idea"><span class="seal-dot cat-idea"></span>Idea / Topic</button>
+          <button type="button" class="category-card" data-category="personal"><span class="seal-dot cat-personal"></span>Personal</button>
+          <button type="button" class="category-card" data-category="people"><span class="seal-dot cat-people"></span>Person / Relationship</button>
+          <button type="button" class="category-card" data-category="finance"><span class="seal-dot cat-finance"></span>Investment</button>
+        </div>
+      </div>
+
+      <div id="add-step-details" style="display:none;">
+        <button type="button" class="btn-link add-back-btn" id="add-back-btn">‹ Change category</button>
+        <div class="chosen-category-badge" id="chosen-category-badge"></div>
+        <label>What is it?</label>
+        <input type="text" id="node-label" placeholder="e.g. Kite Connect API">
+        <div id="finance-fields" style="display:none;">
+          <div class="field-row">
+            <div>
+              <label>Amount invested (₹)</label>
+              <input type="text" id="node-invested" placeholder="e.g. 50000">
+            </div>
+            <div>
+              <label>Current value (₹)</label>
+              <input type="text" id="node-current" placeholder="e.g. 58000">
+            </div>
+          </div>
+        </div>
+        <button class="btn-primary" id="add-node-btn">Save to my graph</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== NODE NOTES ===================== -->
+  <div id="node-screen" class="overlay-screen hidden">
+    <div class="overlay-topbar">
+      <button type="button" class="btn-ghost overlay-close" id="node-home-btn">‹ Home</button>
+      <div class="overlay-title">Notes</div>
+    </div>
+    <div class="overlay-body">
+      <div class="node-title" id="detail-title"></div>
+      <div class="node-cat" id="detail-cat"></div>
+      <label>Notes</label>
+      <textarea id="detail-note" placeholder="Add a note... or use the mic"></textarea>
+      <div class="voice-row">
+        <button type="button" class="mic-btn" id="mic-btn" title="Speak your note" aria-label="Speak your note">🎙</button>
+        <div class="lang-toggle">
+          <div class="lang-pill active" data-lang="en-IN" id="lang-en">English (India)</div>
+          <div class="lang-pill" data-lang="ta-IN" id="lang-ta">தமிழ்</div>
+        </div>
+      </div>
+      <div class="voice-hint" id="voice-hint"></div>
+      <div id="detail-finance" style="display:none;">
+        <div class="field-row">
+          <div>
+            <label>Amount invested (₹)</label>
+            <input type="text" id="detail-invested" placeholder="e.g. 50000">
+          </div>
+          <div>
+            <label>Current value (₹)</label>
+            <input type="text" id="detail-current" placeholder="e.g. 58000">
+          </div>
+        </div>
+        <div id="return-badge"></div>
+      </div>
+      <button class="btn-primary" id="save-detail-btn">Save changes</button>
+      <div class="save-hint" id="detail-dirty-hint"></div>
+      <button class="btn-link" id="connect-btn">Connect to another node</button>
+      <button class="btn-ghost" id="clear-entry-btn">Clear entry</button>
+      <div id="link-confirm" style="display:none;">
+        <label>Relationship (optional)</label>
+        <input type="text" id="link-label-input" placeholder="e.g. wife, manager, friend">
+        <button class="btn-primary" id="confirm-link-btn">Add connection</button>
+        <button class="btn-ghost" id="cancel-link-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== GRAPH ===================== -->
+  <div id="graph-overlay" class="overlay-screen hidden">
+    <div class="overlay-topbar">
+      <button type="button" class="btn-ghost overlay-close" id="close-graph-btn">‹ Home</button>
       <div class="legend-bar" id="legend">
-        <div class="legend-chip" data-category="career"><div class="dot" style="background:var(--career)"></div>Career</div>
-        <div class="legend-chip" data-category="project"><div class="dot" style="background:var(--project)"></div>Project</div>
-        <div class="legend-chip" data-category="skill"><div class="dot" style="background:var(--skill)"></div>Skill</div>
-        <div class="legend-chip" data-category="idea"><div class="dot" style="background:var(--idea)"></div>Idea</div>
-        <div class="legend-chip" data-category="personal"><div class="dot" style="background:var(--personal)"></div>Personal</div>
-        <div class="legend-chip" data-category="people"><div class="dot" style="background:var(--people)"></div>People</div>
-        <div class="legend-chip" data-category="finance"><div class="dot" style="background:var(--finance)"></div>Investment</div>
+        <div class="legend-chip" data-category="career"><div class="seal-dot cat-career"></div>Career</div>
+        <div class="legend-chip" data-category="project"><div class="seal-dot cat-project"></div>Project</div>
+        <div class="legend-chip" data-category="skill"><div class="seal-dot cat-skill"></div>Skill</div>
+        <div class="legend-chip" data-category="idea"><div class="seal-dot cat-idea"></div>Idea</div>
+        <div class="legend-chip" data-category="personal"><div class="seal-dot cat-personal"></div>Personal</div>
+        <div class="legend-chip" data-category="people"><div class="seal-dot cat-people"></div>People</div>
+        <div class="legend-chip" data-category="finance"><div class="seal-dot cat-finance"></div>Investment</div>
       </div>
     </div>
     <div class="hint" id="connect-hint" style="display:none;">Now tap another node to link it.</div>

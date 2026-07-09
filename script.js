@@ -6,15 +6,15 @@ const DRIVE_FILE_NAME = 'memory-graph-data.json';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
 
-/* ---------- Category colors ---------- */
+/* ---------- Category colors (ink tones for the wax-seal graph nodes) ---------- */
 const CATEGORY_COLOR_HEX = {
-  career: '#A9DCCF',
-  project: '#F6D48A',
-  skill: '#F3AFC0',
-  idea: '#C8B8F0',
-  personal: '#AACDEE',
-  people: '#F3AC8E',
-  finance: '#AEDCA6'
+  career: '#2E6D5E',
+  project: '#B07C1E',
+  skill: '#9C3A56',
+  idea: '#6A4C93',
+  personal: '#3A6089',
+  people: '#A85630',
+  finance: '#3D7A43'
 };
 const CATEGORY_LABELS = {
   career: 'Career',
@@ -73,6 +73,7 @@ let activeFilters = new Set();
 let newNodeCategory = null;   // category chosen in step 1 of the add-node flow
 let isDirty = false;          // true when the selected node has unsaved edits
 let savedSnapshot = null;     // last-saved {note, invested, current} for the selected node
+let currentOverlay = null;    // null = Home screen, else 'add' | 'node' | 'graph'
 
 /* ---------- Auth state ---------- */
 let tokenClient = null;
@@ -88,13 +89,40 @@ const wrap = document.getElementById('graph-wrap');
 let width = wrap.clientWidth, height = wrap.clientHeight;
 svg.attr('viewBox', [0,0,width,height]);
 
+// Small hex helpers used to build the wax-seal gradients below.
+function lightenHex(hex, amt){
+  const num = parseInt(hex.slice(1), 16);
+  const r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
+  const mix = (c) => Math.round(c + (255 - c) * amt);
+  return '#' + [mix(r), mix(g), mix(b)].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+function darkenHex(hex, amt){
+  const num = parseInt(hex.slice(1), 16);
+  const r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
+  const mix = (c) => Math.round(c * (1 - amt));
+  return '#' + [mix(r), mix(g), mix(b)].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+
+// Signature motif: every category node in the graph renders as a small stamped
+// wax seal rather than a flat dot. Defined once in <defs> (a sibling of the
+// zoom/pan group `g`) so it survives every render() call, which only clears `g`.
+const defs = svg.append('defs');
+Object.keys(CATEGORY_COLOR_HEX).forEach(cat => {
+  const base = CATEGORY_COLOR_HEX[cat];
+  const grad = defs.append('radialGradient')
+    .attr('id', 'seal-' + cat).attr('cx', '32%').attr('cy', '26%').attr('r', '80%');
+  grad.append('stop').attr('offset', '0%').attr('stop-color', lightenHex(base, 0.5));
+  grad.append('stop').attr('offset', '55%').attr('stop-color', base);
+  grad.append('stop').attr('offset', '100%').attr('stop-color', darkenHex(base, 0.22));
+});
+
 const g = svg.append('g');
 svg.call(d3.zoom().scaleExtent([0.3,2.5]).on('zoom', (e)=> g.attr('transform', e.transform)));
 
 let linkSel, nodeSel, linkLabelSel;
 let simulation;
 
-/* ---------- Graph overlay show/hide ---------- */
+/* ---------- Screen navigation (Home / Add / Node notes / Graph) ---------- */
 
 function refreshGraphDimensions(){
   width = wrap.clientWidth;
@@ -106,14 +134,48 @@ function refreshGraphDimensions(){
   }
 }
 
-function showGraphOverlay(){
-  document.getElementById('graph-overlay').classList.remove('hidden');
-  refreshGraphDimensions();
+function applyOverlayVisibility(){
+  document.getElementById('add-screen').classList.toggle('hidden', currentOverlay !== 'add');
+  document.getElementById('node-screen').classList.toggle('hidden', currentOverlay !== 'node');
+  document.getElementById('graph-overlay').classList.toggle('hidden', currentOverlay !== 'graph');
+  if(currentOverlay === 'graph') refreshGraphDimensions();
 }
 
-function hideGraphOverlay(){
-  document.getElementById('graph-overlay').classList.add('hidden');
+// Opens a full-screen view. Every view has exactly one way back: its own "‹ Home"
+// button, wired to history.back() — which keeps the phone's hardware back button in
+// sync instead of exiting the app. Switching directly between two overlays (e.g.
+// Graph -> Node notes when picking a link target) replaces the current history entry
+// rather than stacking one on top of another, so "back" from anywhere always lands
+// on Home in a single step.
+function openScreen(view){
+  const wasHome = currentOverlay === null;
+  currentOverlay = view;
+  applyOverlayVisibility();
+  if(wasHome){
+    history.pushState({ mgOverlay: view }, '');
+  } else {
+    history.replaceState({ mgOverlay: view }, '');
+  }
 }
+
+window.addEventListener('popstate', () => {
+  if(currentOverlay === 'node' && isDirty){
+    const label = selectedNode ? selectedNode.label : 'this entry';
+    const discard = window.confirm(`You have unsaved changes to "${label}". Discard them and go back?`);
+    if(!discard){
+      history.pushState({ mgOverlay: 'node' }, ''); // veto the back navigation, stay put
+      return;
+    }
+    if(savedSnapshot && selectedNode){
+      selectedNode.note = savedSnapshot.note;
+      selectedNode.invested = savedSnapshot.invested;
+      selectedNode.current = savedSnapshot.current;
+    }
+    clearDirty();
+  }
+  currentOverlay = null;
+  applyOverlayVisibility();
+});
 
 /* ==========================================================
    Google sign-in (Google Identity Services token client)
@@ -181,7 +243,11 @@ async function handleSignIn(){
   mainBtn.style.display = 'none';
   spinner.style.display = 'block';
   try{
-    await requestToken('consent');
+    try{
+      await requestToken('', 4000); // silent — succeeds without any UI if a session is already granted
+    }catch(silentErr){
+      await requestToken('consent'); // first time, or silent failed — show the picker once
+    }
     document.getElementById('signin-overlay').classList.add('hidden');
     document.getElementById('app').style.display = 'flex';
     document.getElementById('auth-status').textContent = 'Signed in · syncing…';
@@ -209,6 +275,7 @@ function handleSignOut(){
   selectedNode = null;
   savedSnapshot = null;
   clearDirty();
+  currentOverlay = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('signin-overlay').classList.remove('hidden');
   document.getElementById('sign-in-btn-main').style.display = 'inline-block';
@@ -367,7 +434,8 @@ function render(){
   nodeG.append('circle')
     .attr('class','core')
     .attr('r', 28)
-    .attr('fill', d => CATEGORY_COLOR_HEX[d.category]);
+    .attr('fill', d => 'url(#seal-' + d.category + ')')
+    .attr('stroke', d => darkenHex(CATEGORY_COLOR_HEX[d.category], 0.35));
 
   nodeG.append('text')
     .attr('dy', 44)
@@ -435,7 +503,6 @@ svg.on('click', () => {
   selectedNode = null;
   savedSnapshot = null;
   clearDirty();
-  document.getElementById('details-section').style.display = 'none';
   updateSelectionStyles();
 });
 
@@ -454,7 +521,7 @@ function onNodeClick(d){
       }
       linkTarget = d;
       document.getElementById('connect-hint').style.display = 'none';
-      hideGraphOverlay();
+      openScreen('node');
       const confirmBox = document.getElementById('link-confirm');
       confirmBox.style.display = 'block';
       document.getElementById('link-label-input').value = '';
@@ -463,7 +530,7 @@ function onNodeClick(d){
     return;
   }
   const switched = selectNode(d);
-  if(switched !== false) hideGraphOverlay();
+  if(switched !== false) openScreen('node');
 }
 
 function updateFinanceSummary(){
@@ -522,9 +589,8 @@ function selectNode(d){
   clearDirty();
   if(recognizing && recognition){ recognition.stop(); }
   document.getElementById('voice-hint').textContent = '';
-  document.getElementById('details-section').style.display = 'block';
   document.getElementById('detail-title').textContent = d.label;
-  document.getElementById('detail-cat').textContent = d.category;
+  document.getElementById('detail-cat').textContent = CATEGORY_LABELS[d.category] || d.category;
   document.getElementById('detail-note').value = d.note || '';
   const financeBox = document.getElementById('detail-finance');
   if(d.category === 'finance'){
@@ -695,8 +761,17 @@ function setupSpeechRecognition(){
 
 document.getElementById('sign-in-btn-main').addEventListener('click', handleSignIn);
 document.getElementById('sign-out-btn').addEventListener('click', handleSignOut);
-document.getElementById('graph-toggle-btn').addEventListener('click', showGraphOverlay);
-document.getElementById('close-graph-btn').addEventListener('click', hideGraphOverlay);
+
+document.getElementById('open-graph-btn').addEventListener('click', () => openScreen('graph'));
+document.getElementById('close-graph-btn').addEventListener('click', () => history.back());
+
+document.getElementById('open-add-btn').addEventListener('click', () => {
+  goToAddStep1();
+  openScreen('add');
+});
+document.getElementById('add-home-btn').addEventListener('click', () => history.back());
+
+document.getElementById('node-home-btn').addEventListener('click', () => history.back());
 
 function goToAddStep1(){
   newNodeCategory = null;
@@ -710,7 +785,7 @@ document.querySelectorAll('.category-card').forEach(card => {
     document.getElementById('add-step-category').style.display = 'none';
     document.getElementById('add-step-details').style.display = 'block';
     const badge = document.getElementById('chosen-category-badge');
-    badge.innerHTML = `<span class="cat-dot" style="background:${CATEGORY_COLOR_HEX[newNodeCategory]}"></span>${CATEGORY_LABELS[newNodeCategory]}`;
+    badge.innerHTML = `<span class="seal-dot cat-${newNodeCategory}"></span>${CATEGORY_LABELS[newNodeCategory]}`;
     document.getElementById('finance-fields').style.display = newNodeCategory === 'finance' ? 'block' : 'none';
     document.getElementById('node-label').focus();
   });
@@ -782,7 +857,7 @@ document.getElementById('connect-btn').addEventListener('click', () => {
   const hint = document.getElementById('connect-hint');
   hint.style.display = 'block';
   hint.textContent = `Now tap another node to link with "${selectedNode.label}".`;
-  showGraphOverlay();
+  openScreen('graph');
 });
 
 document.getElementById('confirm-link-btn').addEventListener('click', () => {
@@ -800,20 +875,22 @@ document.getElementById('cancel-link-btn').addEventListener('click', () => {
   exitLinkMode();
 });
 
-document.getElementById('delete-btn').addEventListener('click', () => {
+document.getElementById('clear-entry-btn').addEventListener('click', () => {
   if(!selectedNode) return;
-  const id = selectedNode.id;
-  data.nodes = data.nodes.filter(n => n.id !== id);
-  data.links = data.links.filter(l => {
-    const s = l.source.id || l.source, t = l.target.id || l.target;
-    return s !== id && t !== id;
-  });
-  selectedNode = null;
-  savedSnapshot = null;
-  clearDirty();
-  document.getElementById('details-section').style.display = 'none';
-  persist();
-  render();
+  const extra = selectedNode.category === 'finance' ? ' and investment figures' : '';
+  const ok = window.confirm(`Clear the notes${extra} for this entry? Tap "Save changes" afterward to make it permanent.`);
+  if(!ok) return;
+  document.getElementById('detail-note').value = '';
+  selectedNode.note = '';
+  if(selectedNode.category === 'finance'){
+    document.getElementById('detail-invested').value = '';
+    document.getElementById('detail-current').value = '';
+    selectedNode.invested = null;
+    selectedNode.current = null;
+    updateReturnBadge(selectedNode);
+    updateFinanceSummary();
+  }
+  markDirty();
 });
 
 document.getElementById('reset-btn').addEventListener('click', () => {
@@ -824,7 +901,6 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   savedSnapshot = null;
   clearDirty();
   activeFilters = new Set();
-  document.getElementById('details-section').style.display = 'none';
   goToAddStep1();
   persist();
   render();
