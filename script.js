@@ -6,15 +6,18 @@ const DRIVE_FILE_NAME = 'memory-graph-data.json';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
 
-/* ---------- Category colors (ink tones for the wax-seal graph nodes) ---------- */
+const DATA_VERSION = 2;
+const NODE_R = 26; // node circle radius, also used to offset link endpoints for arrowheads
+
+/* ---------- Category colors (Material tonal fills) ---------- */
 const CATEGORY_COLOR_HEX = {
-  career: '#2E6D5E',
-  project: '#B07C1E',
-  skill: '#9C3A56',
-  idea: '#6A4C93',
-  personal: '#3A6089',
-  people: '#A85630',
-  finance: '#3D7A43'
+  career: '#00A78E',
+  project: '#F5A623',
+  skill: '#EF5DA8',
+  idea: '#8C5CF2',
+  personal: '#4C8DF5',
+  people: '#F97644',
+  finance: '#34B95C'
 };
 const CATEGORY_LABELS = {
   career: 'Career',
@@ -26,8 +29,13 @@ const CATEGORY_LABELS = {
   finance: 'Investment'
 };
 
+// Suggested relationship vocabulary, offered as quick-pick chips wherever a
+// relationship label can be typed. Free text is always allowed too.
+const REL_VOCAB = ['works at', 'built', 'uses', 'knows', 'part of', 'led to', 'invested in'];
+
 function seedData(){
   return {
+    version: DATA_VERSION,
     nodes: [
       {id:'you', label:'Sugapriyan', category:'personal', note:'You.'},
       {id:'career-rd', label:'Rural Development (Programmer)', category:'career', note:'2012–2023. IT implementation support & training for central government schemes.'},
@@ -63,6 +71,18 @@ function seedData(){
   };
 }
 
+// Upgrades older on-Drive data in place. v1 (no version field) -> v2: adds the
+// version marker and a 'dir' field on links ('none' | 'st' | 'ts'). Existing
+// links stay undirected — direction is opt-in via the link editor.
+function migrateData(d){
+  if(!d || !Array.isArray(d.nodes) || !Array.isArray(d.links)) return seedData();
+  if(!d.version || d.version < DATA_VERSION){
+    d.version = DATA_VERSION;
+  }
+  d.links.forEach(l => { if(l.dir !== 'st' && l.dir !== 'ts') l.dir = 'none'; });
+  return d;
+}
+
 /* ---------- App state ---------- */
 let data = null;
 let selectedNode = null;
@@ -70,10 +90,18 @@ let linkMode = false;
 let linkSource = null;
 let linkTarget = null;
 let activeFilters = new Set();
-let newNodeCategory = null;   // category chosen in step 1 of the add-node flow
+let newNodeCategory = null;   // category chosen in step 1 of the add flow
 let isDirty = false;          // true when the selected node has unsaved edits
 let savedSnapshot = null;     // last-saved {note, invested, current} for the selected node
-let currentOverlay = null;    // null = Home screen, else 'add' | 'node' | 'graph'
+let currentOverlay = null;    // null = Home, else 'add' | 'node' | 'ask' | 'graph'
+
+let addChips = [];            // [{id, label, category, rel}] — pending connections for the node being added
+let activeChipId = null;      // chip currently open in the inline relationship editor
+let editingLink = null;       // link object open in the bottom sheet
+let focusNodeId = null;       // node spotlighted on the graph canvas
+let focusHops = 1;            // 1 or 2 hop neighborhood in focus mode
+let pathHighlight = null;     // {nodes:Set, links:Set} from the path finder
+let undoStash = null;         // {node, links, timer} for soft-deleted node
 
 /* ---------- Auth state ---------- */
 let tokenClient = null;
@@ -89,40 +117,30 @@ const wrap = document.getElementById('graph-wrap');
 let width = wrap.clientWidth, height = wrap.clientHeight;
 svg.attr('viewBox', [0,0,width,height]);
 
-// Small hex helpers used to build the wax-seal gradients below.
-function lightenHex(hex, amt){
-  const num = parseInt(hex.slice(1), 16);
-  const r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
-  const mix = (c) => Math.round(c + (255 - c) * amt);
-  return '#' + [mix(r), mix(g), mix(b)].map(v => v.toString(16).padStart(2,'0')).join('');
-}
-function darkenHex(hex, amt){
-  const num = parseInt(hex.slice(1), 16);
-  const r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
-  const mix = (c) => Math.round(c * (1 - amt));
-  return '#' + [mix(r), mix(g), mix(b)].map(v => v.toString(16).padStart(2,'0')).join('');
-}
-
-// Signature motif: every category node in the graph renders as a small stamped
-// wax seal rather than a flat dot. Defined once in <defs> (a sibling of the
-// zoom/pan group `g`) so it survives every render() call, which only clears `g`.
+// Arrowhead marker for directional links. Lives in <defs>, a sibling of the
+// zoom/pan group `g`, so it survives every render() (which only clears `g`).
+// orient='auto-start-reverse' lets the same marker serve both line ends.
 const defs = svg.append('defs');
-Object.keys(CATEGORY_COLOR_HEX).forEach(cat => {
-  const base = CATEGORY_COLOR_HEX[cat];
-  const grad = defs.append('radialGradient')
-    .attr('id', 'seal-' + cat).attr('cx', '32%').attr('cy', '26%').attr('r', '80%');
-  grad.append('stop').attr('offset', '0%').attr('stop-color', lightenHex(base, 0.5));
-  grad.append('stop').attr('offset', '55%').attr('stop-color', base);
-  grad.append('stop').attr('offset', '100%').attr('stop-color', darkenHex(base, 0.22));
-});
+defs.append('marker')
+  .attr('id', 'arrow')
+  .attr('viewBox', '0 -5 10 10')
+  .attr('refX', 8)
+  .attr('markerWidth', 6.5)
+  .attr('markerHeight', 6.5)
+  .attr('orient', 'auto-start-reverse')
+  .append('path')
+  .attr('d', 'M0,-5L10,0L0,5')
+  .attr('fill', '#4B4556');
 
 const g = svg.append('g');
 svg.call(d3.zoom().scaleExtent([0.3,2.5]).on('zoom', (e)=> g.attr('transform', e.transform)));
 
-let linkSel, nodeSel, linkLabelSel;
+let linkSel, linkHitSel, nodeSel, linkLabelSel;
 let simulation;
 
-/* ---------- Screen navigation (Home / Add / Node notes / Graph) ---------- */
+/* ==========================================================
+   Screen navigation (Home / Ask / Graph tabs + Add / Notes overlays)
+   ========================================================== */
 
 function refreshGraphDimensions(){
   width = wrap.clientWidth;
@@ -141,15 +159,24 @@ function applyOverlayVisibility(){
   document.getElementById('node-screen').classList.toggle('hidden', currentOverlay !== 'node');
   document.getElementById('ask-screen').classList.toggle('hidden', currentOverlay !== 'ask');
   document.getElementById('graph-overlay').classList.toggle('hidden', currentOverlay !== 'graph');
+
+  // Bottom nav active state (Home / Ask / Graph)
+  document.getElementById('nav-home').classList.toggle('active', currentOverlay === null);
+  document.getElementById('nav-ask').classList.toggle('active', currentOverlay === 'ask');
+  document.getElementById('nav-graph').classList.toggle('active', currentOverlay === 'graph');
+
+  // FAB is available on the three tabs, hidden while Add / Notes cover the screen
+  const fabHidden = currentOverlay === 'add' || currentOverlay === 'node';
+  document.getElementById('fab-add').classList.toggle('hidden', fabHidden);
+
   if(currentOverlay === 'graph') refreshGraphDimensions();
+  if(currentOverlay !== 'graph'){ clearFocus(); }
 }
 
-// Opens a full-screen view. Every view has exactly one way back: its own "‹ Home"
-// button, wired to history.back() — which keeps the phone's hardware back button in
-// sync instead of exiting the app. Switching directly between two overlays (e.g.
-// Graph -> Node notes when picking a link target) replaces the current history entry
-// rather than stacking one on top of another, so "back" from anywhere always lands
-// on Home in a single step.
+// Every view has exactly one way back: the phone's hardware back (or the
+// on-screen back button, wired to history.back()). Switching directly between
+// two views replaces the history entry rather than stacking, so "back" from
+// anywhere lands on Home in a single step.
 function openScreen(view){
   const wasHome = currentOverlay === null;
   currentOverlay = view;
@@ -176,6 +203,7 @@ window.addEventListener('popstate', () => {
     }
     clearDirty();
   }
+  closeLinkSheet();
   currentOverlay = null;
   applyOverlayVisibility();
 });
@@ -278,6 +306,8 @@ function handleSignOut(){
   selectedNode = null;
   savedSnapshot = null;
   clearDirty();
+  clearFocus();
+  pathHighlight = null;
   currentOverlay = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('signin-overlay').classList.remove('hidden');
@@ -371,7 +401,7 @@ function showSaved(msg){
   el.textContent = msg || 'Saved';
   el.style.opacity = 1;
   clearTimeout(showSaved._t);
-  showSaved._t = setTimeout(() => el.style.opacity = 0, 900);
+  showSaved._t = setTimeout(() => el.style.opacity = 0, 1100);
 }
 
 async function initDriveAndLoad(){
@@ -381,7 +411,7 @@ async function initDriveAndLoad(){
     if(existingId){
       driveFileId = existingId;
       const text = await readDriveFile(existingId);
-      data = text ? JSON.parse(text) : seedData();
+      data = migrateData(text ? JSON.parse(text) : seedData());
     } else {
       data = seedData();
       driveFileId = await createDriveFile(driveFolderId, DRIVE_FILE_NAME, JSON.stringify(data));
@@ -394,19 +424,64 @@ async function initDriveAndLoad(){
   render();
 }
 
+// Strips D3's runtime mutations before writing to Drive: after the simulation
+// binds, link.source/target become node objects and nodes carry vx/vy/fx/fy.
+// Serializing those verbatim bloats the file and can create circular data.
+function serializeData(){
+  return JSON.stringify({
+    version: data.version || DATA_VERSION,
+    nodes: data.nodes.map(n => {
+      const out = { id:n.id, label:n.label, category:n.category, note:n.note || '' };
+      if(n.category === 'finance'){ out.invested = n.invested ?? null; out.current = n.current ?? null; }
+      if(typeof n.x === 'number') out.x = n.x;
+      if(typeof n.y === 'number') out.y = n.y;
+      return out;
+    }),
+    links: data.links.map(l => ({
+      source: (l.source && l.source.id) || l.source,
+      target: (l.target && l.target.id) || l.target,
+      label: l.label || '',
+      dir: l.dir || 'none'
+    }))
+  });
+}
+
 async function persist(){
   if(!driveFileId){ return; }
   try{
-    await updateDriveFile(driveFileId, JSON.stringify(data));
+    await updateDriveFile(driveFileId, serializeData());
     showSaved();
   }catch(e){
     console.error('save failed', e);
   }
 }
 
+/* ---------- Local backup download ---------- */
+
+function downloadBackup(){
+  if(!data) return;
+  const stamp = new Date().toISOString().slice(0,10);
+  const blob = new Blob([serializeData()], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'memory-graph-backup-' + stamp + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  showSaved('Backup downloaded');
+}
+
 /* ==========================================================
    Graph rendering
    ========================================================== */
+
+function linkKey(l){
+  const s = (l.source && l.source.id) || l.source;
+  const t = (l.target && l.target.id) || l.target;
+  return [s, t].sort().join('|');
+}
 
 function render(){
   g.selectAll('*').remove();
@@ -420,7 +495,21 @@ function render(){
     .force('collide', d3.forceCollide(44));
 
   linkSel = g.append('g').selectAll('line')
-    .data(data.links).enter().append('line').attr('class','link');
+    .data(data.links).enter().append('line')
+    .attr('class','link')
+    .attr('marker-end', d => d.dir === 'st' ? 'url(#arrow)' : null)
+    .attr('marker-start', d => d.dir === 'ts' ? 'url(#arrow)' : null);
+
+  // Wide invisible twin of every link, purely as a finger-sized tap target
+  // for the connection editor. Rendered after .link so it sits on top.
+  linkHitSel = g.append('g').selectAll('line')
+    .data(data.links).enter().append('line')
+    .attr('class','link-hit')
+    .on('click', (event, d) => {
+      event.stopPropagation();
+      if(linkMode) return;
+      openLinkSheet(d);
+    });
 
   linkLabelSel = g.append('g').selectAll('text')
     .data(data.links).enter().append('text')
@@ -438,12 +527,11 @@ function render(){
 
   nodeG.append('circle')
     .attr('class','core')
-    .attr('r', 28)
-    .attr('fill', d => 'url(#seal-' + d.category + ')')
-    .attr('stroke', d => darkenHex(CATEGORY_COLOR_HEX[d.category], 0.35));
+    .attr('r', NODE_R)
+    .attr('fill', d => CATEGORY_COLOR_HEX[d.category]);
 
   nodeG.append('text')
-    .attr('dy', 44)
+    .attr('dy', NODE_R + 16)
     .selectAll('tspan')
     .data(d => wrapLabel(d.label))
     .enter().append('tspan')
@@ -454,18 +542,29 @@ function render(){
   nodeSel = nodeG;
 
   simulation.on('tick', () => {
-    linkSel
+    // Trim each link back from the node centers so arrowheads stay visible
+    // outside the circles instead of hiding underneath them.
+    linkSel.each(function(d){
+      const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+      const len = Math.sqrt(dx*dx + dy*dy) || 1;
+      const pad = NODE_R + 3;
+      const sx = d.source.x + (dx/len) * pad, sy = d.source.y + (dy/len) * pad;
+      const tx = d.target.x - (dx/len) * pad, ty = d.target.y - (dy/len) * pad;
+      d3.select(this).attr('x1', sx).attr('y1', sy).attr('x2', tx).attr('y2', ty);
+    });
+    linkHitSel
       .attr('x1', d=>d.source.x).attr('y1', d=>d.source.y)
       .attr('x2', d=>d.target.x).attr('y2', d=>d.target.y);
     linkLabelSel
       .attr('x', d => (d.source.x + d.target.x) / 2)
-      .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
+      .attr('y', d => (d.source.y + d.target.y) / 2 - 5);
     nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
   });
 
   updateSelectionStyles();
   updateFinanceSummary();
-  updateFilterVisuals();
+  updateStats();
+  updateVisibility();
 }
 
 function wrapLabel(label){
@@ -496,19 +595,13 @@ function dragended(event, d){
 
 svg.on('click', () => {
   if(linkMode){ exitLinkMode(); return; }
-  if(selectedNode && isDirty){
-    const discard = window.confirm(`You have unsaved changes to "${selectedNode.label}". Discard them and close?`);
-    if(!discard) return;
-    if(savedSnapshot){
-      selectedNode.note = savedSnapshot.note;
-      selectedNode.invested = savedSnapshot.invested;
-      selectedNode.current = savedSnapshot.current;
-    }
-  }
+  clearFocus();
+  pathHighlight = null;
   selectedNode = null;
   savedSnapshot = null;
   clearDirty();
   updateSelectionStyles();
+  updateVisibility();
 });
 
 function onNodeClick(d){
@@ -534,8 +627,151 @@ function onNodeClick(d){
     }
     return;
   }
-  const switched = selectNode(d);
-  if(switched !== false) openScreen('node');
+  // Tap-to-focus: spotlight the node's neighborhood and show its card.
+  // Notes open from the card, so a stray tap never yanks you off the canvas.
+  setFocus(d);
+}
+
+/* ==========================================================
+   Focus mode — spotlight a node's 1- or 2-hop neighborhood
+   ========================================================== */
+
+function neighborhood(nodeId, hops){
+  const adj = {};
+  data.links.forEach(l => {
+    const s = (l.source && l.source.id) || l.source;
+    const t = (l.target && l.target.id) || l.target;
+    (adj[s] = adj[s] || []).push(t);
+    (adj[t] = adj[t] || []).push(s);
+  });
+  const nodes = new Set([nodeId]);
+  let frontier = [nodeId];
+  for(let h = 0; h < hops; h++){
+    const next = [];
+    frontier.forEach(id => (adj[id] || []).forEach(other => {
+      if(!nodes.has(other)){ nodes.add(other); next.push(other); }
+    }));
+    frontier = next;
+  }
+  const links = new Set();
+  data.links.forEach(l => {
+    const s = (l.source && l.source.id) || l.source;
+    const t = (l.target && l.target.id) || l.target;
+    if(nodes.has(s) && nodes.has(t)) links.add(linkKey(l));
+  });
+  return { nodes, links };
+}
+
+function setFocus(d){
+  focusNodeId = d.id;
+  focusHops = 1;
+  selectedNode = d;
+  savedSnapshot = snapshotNode(d);
+  updateSelectionStyles();
+  const card = document.getElementById('focus-card');
+  card.classList.remove('hidden');
+  document.getElementById('focus-title').textContent = d.label;
+  document.getElementById('focus-cat').textContent = CATEGORY_LABELS[d.category] || d.category;
+  const dot = document.getElementById('focus-dot');
+  dot.className = 'cat-dot cat-' + d.category;
+  document.getElementById('focus-hops-btn').textContent = 'Show 2 hops';
+  updateVisibility();
+}
+
+function clearFocus(){
+  focusNodeId = null;
+  focusHops = 1;
+  document.getElementById('focus-card').classList.add('hidden');
+  updateVisibility();
+}
+
+/* ==========================================================
+   Visibility — one pass combining focus, path highlight and
+   category filters (priority: focus > path > filters)
+   ========================================================== */
+
+function updateVisibility(){
+  const legend = document.getElementById('legend');
+  legend.classList.toggle('filtering', activeFilters.size > 0);
+  legend.querySelectorAll('.legend-chip').forEach(item => {
+    item.classList.toggle('active', activeFilters.has(item.dataset.category));
+  });
+
+  if(!nodeSel) return;
+
+  let visNodes = null, visLinks = null;
+  if(focusNodeId){
+    const n = neighborhood(focusNodeId, focusHops);
+    visNodes = n.nodes; visLinks = n.links;
+  } else if(pathHighlight){
+    visNodes = pathHighlight.nodes; visLinks = pathHighlight.links;
+  }
+
+  if(visNodes){
+    nodeSel.style('opacity', d => visNodes.has(d.id) ? 1 : 0.12);
+    linkSel
+      .style('opacity', d => visLinks.has(linkKey(d)) ? 1 : 0.06)
+      .style('stroke', d => (pathHighlight && !focusNodeId && visLinks.has(linkKey(d))) ? '#6446D6' : null)
+      .style('stroke-width', d => (pathHighlight && !focusNodeId && visLinks.has(linkKey(d))) ? 3.5 : null);
+    linkLabelSel.style('opacity', d => visLinks.has(linkKey(d)) ? 1 : 0.06);
+    return;
+  }
+
+  linkSel.style('stroke', null).style('stroke-width', null);
+  nodeSel.style('opacity', d => (activeFilters.size === 0 || activeFilters.has(d.category)) ? 1 : 0.15);
+  const linkFilterOpacity = d => {
+    if(activeFilters.size === 0) return 1;
+    const sc = (d.source && typeof d.source === 'object') ? d.source.category : null;
+    const tc = (d.target && typeof d.target === 'object') ? d.target.category : null;
+    return (activeFilters.has(sc) || activeFilters.has(tc)) ? 1 : 0.08;
+  };
+  linkSel.style('opacity', linkFilterOpacity);
+  linkLabelSel.style('opacity', linkFilterOpacity);
+}
+
+/* ==========================================================
+   Link editor bottom sheet — rename, direction, delete
+   ========================================================== */
+
+function linkEndLabels(l){
+  const sId = (l.source && l.source.id) || l.source;
+  const tId = (l.target && l.target.id) || l.target;
+  const sNode = data.nodes.find(n => n.id === sId);
+  const tNode = data.nodes.find(n => n.id === tId);
+  return { s: sNode ? sNode.label : sId, t: tNode ? tNode.label : tId };
+}
+
+function shortName(label){
+  return label.length > 14 ? label.slice(0, 13) + '…' : label;
+}
+
+function openLinkSheet(l){
+  editingLink = l;
+  const ends = linkEndLabels(l);
+  document.getElementById('link-sheet-title').textContent = ends.s + '  ·  ' + ends.t;
+  document.getElementById('link-sheet-label').value = l.label || '';
+  document.getElementById('dir-st').textContent = shortName(ends.s) + ' → ' + shortName(ends.t);
+  document.getElementById('dir-ts').textContent = shortName(ends.t) + ' → ' + shortName(ends.s);
+  setDirSegment(l.dir || 'none');
+  document.getElementById('link-sheet').classList.remove('hidden');
+  document.getElementById('link-sheet-scrim').classList.remove('hidden');
+}
+
+function setDirSegment(dir){
+  document.querySelectorAll('#link-dir-seg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.dir === dir);
+  });
+}
+
+function currentDirSegment(){
+  const active = document.querySelector('#link-dir-seg button.active');
+  return active ? active.dataset.dir : 'none';
+}
+
+function closeLinkSheet(){
+  editingLink = null;
+  document.getElementById('link-sheet').classList.add('hidden');
+  document.getElementById('link-sheet-scrim').classList.add('hidden');
 }
 
 /* ==========================================================
@@ -575,41 +811,47 @@ function buildRelationshipIndex(){
   return index;
 }
 
+// Shared scorer: how well a node matches a set of search terms.
+function scoreNode(node, terms, relIndex){
+  let score = 0;
+  const labelLower = node.label.toLowerCase();
+  const noteLower = (node.note || '').toLowerCase();
+  const catLabel = (CATEGORY_LABELS[node.category] || '').toLowerCase();
+  const rels = (relIndex && relIndex[node.id]) || [];
+  terms.forEach(t => {
+    if(labelLower.includes(t)) score += 4;
+    if(catLabel.includes(t)) score += 2;
+    if(noteLower.includes(t)) score += 1;
+    rels.forEach(r => {
+      if(r.label && r.label.toLowerCase().includes(t)) score += 5;
+      if(r.otherLabel.toLowerCase().includes(t)) score += 2;
+    });
+  });
+  return score;
+}
+
 function runAsk(query){
   const resultsBox = document.getElementById('ask-results');
   const terms = tokenizeAsk(query).filter(t => t.length > 1 && !ASK_STOPWORDS.has(t));
 
   if(!data || terms.length === 0){
-    resultsBox.innerHTML = '<div class="empty">Type a name, category, or relationship word — like a person\'s name, "wife", or a project name.</div>';
+    resultsBox.innerHTML = '<div class="card"><div class="empty">Type a name, category, or relationship word — like a person\'s name, "wife", or a project name.</div></div>';
     return;
   }
 
   const relIndex = buildRelationshipIndex();
 
-  const scored = data.nodes.map(node => {
-    let score = 0;
-    const labelLower = node.label.toLowerCase();
-    const noteLower = (node.note || '').toLowerCase();
-    const catLabel = (CATEGORY_LABELS[node.category] || '').toLowerCase();
-    const rels = relIndex[node.id] || [];
-
-    terms.forEach(t => {
-      if(labelLower.includes(t)) score += 4;
-      if(catLabel.includes(t)) score += 2;
-      if(noteLower.includes(t)) score += 1;
-      rels.forEach(r => {
-        if(r.label && r.label.toLowerCase().includes(t)) score += 5;
-        if(r.otherLabel.toLowerCase().includes(t)) score += 2;
-      });
-    });
-    return { node, score, rels };
-  })
+  const scored = data.nodes.map(node => ({
+    node,
+    score: scoreNode(node, terms, relIndex),
+    rels: relIndex[node.id] || []
+  }))
   .filter(r => r.score > 0)
   .sort((a, b) => b.score - a.score)
   .slice(0, 6);
 
   if(scored.length === 0){
-    resultsBox.innerHTML = '<div class="empty">No matches in your graph yet for that. Try different words, or add more notes and connections.</div>';
+    resultsBox.innerHTML = '<div class="card"><div class="empty">No matches in your graph yet for that. Try different words, or add more notes and connections.</div></div>';
     return;
   }
 
@@ -621,7 +863,7 @@ function runAsk(query){
     return `
       <div class="ask-result">
         <div class="ask-result-head">
-          <span class="seal-dot cat-${r.node.category}"></span>
+          <span class="cat-dot cat-${r.node.category}"></span>
           <span class="ask-result-title">${escapeHtml(r.node.label)}</span>
         </div>
         <div class="node-cat">${escapeHtml(CATEGORY_LABELS[r.node.category] || r.node.category)}</div>
@@ -630,6 +872,109 @@ function runAsk(query){
       </div>
     `;
   }).join('');
+}
+
+/* ==========================================================
+   Path finder — BFS shortest path between any two memories
+   ========================================================== */
+
+function populatePathSelects(){
+  const from = document.getElementById('path-from');
+  const to = document.getElementById('path-to');
+  const prevFrom = from.value, prevTo = to.value;
+  const optionsHtml = '<option value="">— choose —</option>' +
+    data.nodes.map(n => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.label)}</option>`).join('');
+  from.innerHTML = optionsHtml;
+  to.innerHTML = optionsHtml;
+  if(data.nodes.some(n => n.id === prevFrom)) from.value = prevFrom;
+  if(data.nodes.some(n => n.id === prevTo)) to.value = prevTo;
+}
+
+function findPath(fromId, toId){
+  if(fromId === toId) return [fromId];
+  const adj = {};
+  data.links.forEach(l => {
+    const s = (l.source && l.source.id) || l.source;
+    const t = (l.target && l.target.id) || l.target;
+    (adj[s] = adj[s] || []).push(t);
+    (adj[t] = adj[t] || []).push(s);
+  });
+  const prev = { [fromId]: null };
+  const queue = [fromId];
+  while(queue.length){
+    const cur = queue.shift();
+    if(cur === toId) break;
+    (adj[cur] || []).forEach(next => {
+      if(!(next in prev)){ prev[next] = cur; queue.push(next); }
+    });
+  }
+  if(!(toId in prev)) return null;
+  const path = [];
+  let cur = toId;
+  while(cur !== null){ path.unshift(cur); cur = prev[cur]; }
+  return path;
+}
+
+function runPathFinder(){
+  const fromId = document.getElementById('path-from').value;
+  const toId = document.getElementById('path-to').value;
+  const box = document.getElementById('path-result');
+  if(!fromId || !toId){
+    box.innerHTML = '<div class="empty">Choose two memories to connect.</div>';
+    return;
+  }
+  const path = findPath(fromId, toId);
+  if(!path){
+    box.innerHTML = '<div class="empty">No path found — these two aren\'t connected through your graph yet.</div>';
+    pathHighlight = null;
+    return;
+  }
+  const byId = {};
+  data.nodes.forEach(n => byId[n.id] = n);
+  const chain = path.map((id, i) => {
+    const n = byId[id];
+    const step = `<span class="path-step"><span class="cat-dot cat-${n.category}"></span>${escapeHtml(n.label)}</span>`;
+    return i === 0 ? step : `<span class="path-arrow">→</span>${step}`;
+  }).join('');
+  box.innerHTML = `<div class="path-chain">${chain}</div><button class="btn-filled" id="path-show-btn">Show on graph</button>`;
+
+  const nodesSet = new Set(path);
+  const linksSet = new Set();
+  for(let i = 0; i < path.length - 1; i++){
+    linksSet.add([path[i], path[i+1]].sort().join('|'));
+  }
+  document.getElementById('path-show-btn').addEventListener('click', () => {
+    pathHighlight = { nodes: nodesSet, links: linksSet };
+    clearFocus();
+    openScreen('graph');
+    updateVisibility();
+  });
+}
+
+/* ==========================================================
+   Home cards: stats & investment summary
+   ========================================================== */
+
+function updateStats(){
+  const box = document.getElementById('graph-stats');
+  if(!data){ box.innerHTML = ''; return; }
+  const nodeCount = data.nodes.length;
+  const linkCount = data.links.length;
+  const linked = new Set();
+  data.links.forEach(l => {
+    linked.add((l.source && l.source.id) || l.source);
+    linked.add((l.target && l.target.id) || l.target);
+  });
+  const orphans = data.nodes.filter(n => !linked.has(n.id));
+  let html = `
+    <div class="stat-pill"><div class="stat-num">${nodeCount}</div><div class="stat-label">memories</div></div>
+    <div class="stat-pill"><div class="stat-num">${linkCount}</div><div class="stat-label">connections</div></div>
+  `;
+  if(orphans.length > 0){
+    const names = orphans.slice(0,3).map(n => escapeHtml(n.label)).join(', ');
+    html += `<div class="stat-note">${orphans.length} ${orphans.length === 1 ? 'memory has' : 'memories have'} no connections yet (${names}${orphans.length > 3 ? '…' : ''}). Open them and tap "Connect to another node" so they don't get lost.</div>`;
+  }
+  box.innerHTML = html;
 }
 
 function updateFinanceSummary(){
@@ -655,6 +1000,10 @@ function updateFinanceSummary(){
   box.querySelector('.summary-row.total').classList.add(colorClass);
 }
 
+/* ==========================================================
+   Node selection & dirty tracking
+   ========================================================== */
+
 function snapshotNode(d){
   return { note: d.note || '', invested: d.invested ?? null, current: d.current ?? null };
 }
@@ -676,7 +1025,6 @@ function selectNode(d){
   if(selectedNode && d.id !== selectedNode.id && isDirty){
     const discard = window.confirm(`You have unsaved changes to "${selectedNode.label}". Discard them and switch?`);
     if(!discard) return false;
-    // revert the in-place mutations on the previously-selected node back to last-saved values
     if(savedSnapshot){
       selectedNode.note = savedSnapshot.note;
       selectedNode.invested = savedSnapshot.invested;
@@ -723,29 +1071,6 @@ function updateSelectionStyles(){
   nodeSel.classed('selected', d => selectedNode && d.id === selectedNode.id);
 }
 
-function updateFilterVisuals(){
-  const legend = document.getElementById('legend');
-  legend.classList.toggle('filtering', activeFilters.size > 0);
-  legend.querySelectorAll('.legend-chip').forEach(item => {
-    item.classList.toggle('active', activeFilters.has(item.dataset.category));
-  });
-
-  if(!nodeSel) return;
-  nodeSel.style('opacity', d => (activeFilters.size === 0 || activeFilters.has(d.category)) ? 1 : 0.15);
-  linkSel.style('opacity', d => {
-    if(activeFilters.size === 0) return 1;
-    const sc = (d.source && typeof d.source === 'object') ? d.source.category : null;
-    const tc = (d.target && typeof d.target === 'object') ? d.target.category : null;
-    return (activeFilters.has(sc) || activeFilters.has(tc)) ? 1 : 0.08;
-  });
-  linkLabelSel.style('opacity', d => {
-    if(activeFilters.size === 0) return 1;
-    const sc = (d.source && typeof d.source === 'object') ? d.source.category : null;
-    const tc = (d.target && typeof d.target === 'object') ? d.target.category : null;
-    return (activeFilters.has(sc) || activeFilters.has(tc)) ? 1 : 0.08;
-  });
-}
-
 function exitLinkMode(){
   linkMode = false;
   linkSource = null;
@@ -753,6 +1078,62 @@ function exitLinkMode(){
   document.getElementById('connect-btn').classList.remove('active');
   document.getElementById('connect-hint').style.display = 'none';
   document.getElementById('link-confirm').style.display = 'none';
+}
+
+/* ==========================================================
+   Soft delete with undo snackbar
+   ========================================================== */
+
+function showSnackbar(msg, showUndo){
+  const bar = document.getElementById('snackbar');
+  document.getElementById('snackbar-msg').textContent = msg;
+  document.getElementById('snackbar-undo').style.display = showUndo ? 'block' : 'none';
+  bar.classList.remove('hidden');
+  clearTimeout(showSnackbar._t);
+  showSnackbar._t = setTimeout(() => bar.classList.add('hidden'), 6000);
+}
+
+function deleteSelectedNode(){
+  if(!selectedNode || !data) return;
+  if(selectedNode.id === 'you'){
+    showSnackbar('The root node can\'t be deleted.', false);
+    return;
+  }
+  const node = selectedNode;
+  const id = node.id;
+  const removedLinks = data.links.filter(l => {
+    const s = (l.source && l.source.id) || l.source;
+    const t = (l.target && l.target.id) || l.target;
+    return s === id || t === id;
+  });
+  data.nodes = data.nodes.filter(n => n.id !== id);
+  data.links = data.links.filter(l => !removedLinks.includes(l));
+  undoStash = { node, links: removedLinks };
+  selectedNode = null;
+  savedSnapshot = null;
+  clearDirty();
+  clearFocus();
+  persist();
+  render();
+  history.back(); // leave the notes screen
+  showSnackbar(`Deleted "${node.label}"`, true);
+}
+
+function undoDelete(){
+  if(!undoStash || !data) return;
+  data.nodes.push(undoStash.node);
+  undoStash.links.forEach(l => data.links.push({
+    source: (l.source && l.source.id) || l.source,
+    target: (l.target && l.target.id) || l.target,
+    label: l.label || '',
+    dir: l.dir || 'none'
+  }));
+  const restoredLabel = undoStash.node.label;
+  undoStash = null;
+  persist();
+  render();
+  document.getElementById('snackbar').classList.add('hidden');
+  showSaved(`Restored "${restoredLabel}"`);
 }
 
 /* ==========================================================
@@ -855,91 +1236,243 @@ function setupSpeechRecognition(){
 }
 
 /* ==========================================================
-   Static UI wiring
+   Add flow — chip picker, inline relationship labels,
+   suggested connections
    ========================================================== */
-
-document.getElementById('sign-in-btn-main').addEventListener('click', handleSignIn);
-document.getElementById('sign-out-btn').addEventListener('click', handleSignOut);
-
-document.getElementById('open-graph-btn').addEventListener('click', () => openScreen('graph'));
-document.getElementById('close-graph-btn').addEventListener('click', () => history.back());
-
-document.getElementById('open-add-btn').addEventListener('click', () => {
-  goToAddStep1();
-  openScreen('add');
-});
-document.getElementById('add-home-btn').addEventListener('click', () => history.back());
-
-document.getElementById('node-home-btn').addEventListener('click', () => history.back());
-
-document.getElementById('open-ask-btn').addEventListener('click', () => {
-  document.getElementById('ask-results').innerHTML = '';
-  document.getElementById('ask-input').value = '';
-  openScreen('ask');
-  document.getElementById('ask-input').focus();
-});
-document.getElementById('ask-home-btn').addEventListener('click', () => history.back());
-document.getElementById('ask-btn').addEventListener('click', () => runAsk(document.getElementById('ask-input').value));
-document.getElementById('ask-input').addEventListener('keydown', (e) => {
-  if(e.key === 'Enter'){ e.preventDefault(); runAsk(e.target.value); }
-});
 
 function goToAddStep1(){
   newNodeCategory = null;
+  addChips = [];
+  activeChipId = null;
+  document.getElementById('chip-rel-editor').classList.add('hidden');
+  document.getElementById('suggest-row-wrap').classList.add('hidden');
+  document.getElementById('connect-search').value = '';
+  document.getElementById('connect-results').classList.add('hidden');
+  document.getElementById('node-label').value = '';
   document.getElementById('add-step-details').style.display = 'none';
   document.getElementById('add-step-category').style.display = 'block';
 }
 
 // The root node representing the person themselves — seedData always creates it
-// as id 'you', and there is currently no way to delete it from the app.
+// as id 'you', and the app never allows deleting it.
 function findYouNodeId(){
   if(!data) return null;
   const you = data.nodes.find(n => n.id === 'you');
   return you ? you.id : null;
 }
 
-// Rebuilds the "Connect to" dropdown from the current graph so newly-added nodes
-// can be bonded to an existing one right away, instead of needing a separate trip
-// through "Connect to another node" afterward. Person/Relationship nodes default
-// to the root "you" node — that's the automatic bond for family/relationship
-// entries like a spouse or child — but any category can connect to anything.
-function populateLinkTargetOptions(preferredId){
-  const select = document.getElementById('node-link-target');
-  select.innerHTML = '<option value="">— none —</option>';
-  if(!data) return;
-  data.nodes.forEach(n => {
-    const opt = document.createElement('option');
-    opt.value = n.id;
-    opt.textContent = n.label;
-    select.appendChild(opt);
+function renderAddChips(){
+  const list = document.getElementById('chip-list');
+  list.innerHTML = '';
+  addChips.forEach(chip => {
+    const el = document.createElement('div');
+    el.className = 'link-chip' + (chip.id === activeChipId ? ' editing' : '');
+    el.innerHTML = `
+      <span class="cat-dot cat-${chip.category}"></span>
+      <span class="chip-name">${escapeHtml(chip.label)}</span>
+      ${chip.rel ? `<span class="chip-rel">${escapeHtml(chip.rel)}</span>` : ''}
+      <span class="chip-x" data-remove="${escapeHtml(chip.id)}">✕</span>
+    `;
+    el.addEventListener('click', (e) => {
+      if(e.target.dataset && e.target.dataset.remove){
+        addChips = addChips.filter(c => c.id !== e.target.dataset.remove);
+        if(activeChipId === e.target.dataset.remove){
+          activeChipId = null;
+          document.getElementById('chip-rel-editor').classList.add('hidden');
+        }
+        renderAddChips();
+        refreshSuggestions();
+        return;
+      }
+      openChipRelEditor(chip.id);
+    });
+    list.appendChild(el);
   });
-  select.value = (preferredId && data.nodes.some(n => n.id === preferredId)) ? preferredId : '';
-  document.getElementById('add-link-relationship-wrap').style.display = select.value ? 'block' : 'none';
 }
 
-document.getElementById('node-link-target').addEventListener('change', (e) => {
-  document.getElementById('add-link-relationship-wrap').style.display = e.target.value ? 'block' : 'none';
+function openChipRelEditor(chipId){
+  activeChipId = chipId;
+  const chip = addChips.find(c => c.id === chipId);
+  if(!chip) return;
+  document.getElementById('chip-rel-label').textContent = 'Relationship with "' + chip.label + '" (optional)';
+  document.getElementById('chip-rel-input').value = chip.rel || '';
+  document.getElementById('chip-rel-editor').classList.remove('hidden');
+  renderAddChips();
+  document.getElementById('chip-rel-input').focus();
+}
+
+function closeChipRelEditor(){
+  if(activeChipId){
+    const chip = addChips.find(c => c.id === activeChipId);
+    if(chip) chip.rel = document.getElementById('chip-rel-input').value.trim();
+  }
+  activeChipId = null;
+  document.getElementById('chip-rel-editor').classList.add('hidden');
+  renderAddChips();
+}
+
+function addChip(node){
+  if(addChips.some(c => c.id === node.id)) return;
+  addChips.push({ id: node.id, label: node.label, category: node.category, rel: '' });
+  renderAddChips();
+  refreshSuggestions();
+}
+
+function renderConnectResults(query){
+  const box = document.getElementById('connect-results');
+  const q = query.trim().toLowerCase();
+  if(!q || !data){
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  const matches = data.nodes
+    .filter(n => !addChips.some(c => c.id === n.id) && n.label.toLowerCase().includes(q))
+    .slice(0, 6);
+  if(matches.length === 0){
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '';
+  matches.forEach(n => {
+    const row = document.createElement('div');
+    row.className = 'connect-result';
+    row.innerHTML = `<span class="cat-dot cat-${n.category}"></span>${escapeHtml(n.label)}`;
+    row.addEventListener('click', () => {
+      addChip(n);
+      document.getElementById('connect-search').value = '';
+      box.classList.add('hidden');
+    });
+    box.appendChild(row);
+  });
+  box.classList.remove('hidden');
+}
+
+// "Possibly related" — reuses the Ask scorer against the typed label, so the
+// same brain powers both search and link suggestions. Debounced; hidden when
+// nothing scores or when everything relevant is already chipped.
+let suggestTimer = null;
+function refreshSuggestions(){
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(() => {
+    const wrapEl = document.getElementById('suggest-row-wrap');
+    const row = document.getElementById('suggest-row');
+    const text = document.getElementById('node-label').value;
+    const terms = tokenizeAsk(text).filter(t => t.length > 1 && !ASK_STOPWORDS.has(t));
+    if(!data || terms.length === 0){
+      wrapEl.classList.add('hidden');
+      return;
+    }
+    const relIndex = buildRelationshipIndex();
+    const top = data.nodes
+      .filter(n => !addChips.some(c => c.id === n.id))
+      .map(n => ({ n, score: scoreNode(n, terms, relIndex) }))
+      .filter(r => r.score > 0)
+      .sort((a,b) => b.score - a.score)
+      .slice(0, 3);
+    if(top.length === 0){
+      wrapEl.classList.add('hidden');
+      return;
+    }
+    row.innerHTML = '';
+    top.forEach(r => {
+      const chipEl = document.createElement('span');
+      chipEl.className = 'suggest-chip';
+      chipEl.innerHTML = `<span class="cat-dot cat-${r.n.category}"></span>＋ ${escapeHtml(r.n.label)}`;
+      chipEl.addEventListener('click', () => addChip(r.n));
+      row.appendChild(chipEl);
+    });
+    wrapEl.classList.remove('hidden');
+  }, 400);
+}
+
+// Renders REL_VOCAB quick-pick chips into a container; tapping one puts the
+// verb into the paired input (and keeps focus there for further edits).
+function renderVocabChips(containerId, inputId){
+  const box = document.getElementById(containerId);
+  box.innerHTML = '';
+  REL_VOCAB.forEach(v => {
+    const el = document.createElement('span');
+    el.className = 'vocab-chip';
+    el.textContent = v;
+    el.addEventListener('click', () => {
+      const input = document.getElementById(inputId);
+      input.value = v;
+      input.focus();
+    });
+    box.appendChild(el);
+  });
+}
+
+/* ==========================================================
+   Static UI wiring
+   ========================================================== */
+
+document.getElementById('sign-in-btn-main').addEventListener('click', handleSignIn);
+document.getElementById('sign-out-btn').addEventListener('click', handleSignOut);
+
+/* ---- Bottom nav & FAB ---- */
+document.getElementById('nav-home').addEventListener('click', () => {
+  if(currentOverlay !== null) history.back();
+});
+document.getElementById('nav-ask').addEventListener('click', () => {
+  if(currentOverlay === 'ask') return;
+  populatePathSelects();
+  openScreen('ask');
+});
+document.getElementById('nav-graph').addEventListener('click', () => {
+  if(currentOverlay === 'graph') return;
+  openScreen('graph');
+});
+document.getElementById('fab-add').addEventListener('click', () => {
+  goToAddStep1();
+  openScreen('add');
 });
 
+document.getElementById('add-home-btn').addEventListener('click', () => history.back());
+document.getElementById('node-home-btn').addEventListener('click', () => history.back());
+
+/* ---- Ask & path finder ---- */
+document.getElementById('ask-btn').addEventListener('click', () => runAsk(document.getElementById('ask-input').value));
+document.getElementById('ask-input').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); runAsk(e.target.value); }
+});
+document.getElementById('path-btn').addEventListener('click', runPathFinder);
+
+/* ---- Add flow ---- */
 document.querySelectorAll('.category-card').forEach(card => {
   card.addEventListener('click', () => {
     newNodeCategory = card.dataset.category;
     document.getElementById('add-step-category').style.display = 'none';
     document.getElementById('add-step-details').style.display = 'block';
     const badge = document.getElementById('chosen-category-badge');
-    badge.innerHTML = `<span class="seal-dot cat-${newNodeCategory}"></span>${CATEGORY_LABELS[newNodeCategory]}`;
+    badge.innerHTML = `<span class="cat-dot cat-${newNodeCategory}"></span>${CATEGORY_LABELS[newNodeCategory]}`;
     document.getElementById('finance-fields').style.display = newNodeCategory === 'finance' ? 'block' : 'none';
-    populateLinkTargetOptions(newNodeCategory === 'people' ? findYouNodeId() : null);
+    // Person/Relationship entries start pre-bonded to the root "you" node —
+    // shown as a removable chip rather than a hidden default.
+    addChips = [];
+    if(newNodeCategory === 'people'){
+      const youId = findYouNodeId();
+      const you = youId ? data.nodes.find(n => n.id === youId) : null;
+      if(you) addChips.push({ id: you.id, label: you.label, category: you.category, rel: '' });
+    }
+    renderAddChips();
     document.getElementById('node-label').focus();
   });
 });
 
 document.getElementById('add-back-btn').addEventListener('click', goToAddStep1);
 
+document.getElementById('node-label').addEventListener('input', refreshSuggestions);
+document.getElementById('connect-search').addEventListener('input', (e) => renderConnectResults(e.target.value));
+document.getElementById('chip-rel-done').addEventListener('click', closeChipRelEditor);
+
 document.getElementById('add-node-btn').addEventListener('click', () => {
   const labelInput = document.getElementById('node-label');
   const label = labelInput.value.trim();
   if(!label || !data || !newNodeCategory) return;
+  closeChipRelEditor(); // capture any relationship text still open in the editor
   const category = newNodeCategory;
   const id = 'n-' + Date.now();
   const node = {id, label, category, note:'', x: width/2 + (Math.random()-0.5)*100, y: height/2 + (Math.random()-0.5)*100};
@@ -953,20 +1486,19 @@ document.getElementById('add-node-btn').addEventListener('click', () => {
   }
   data.nodes.push(node);
 
-  const linkTargetId = document.getElementById('node-link-target').value;
-  if(linkTargetId){
-    const relLabel = document.getElementById('node-link-label').value.trim();
-    data.links.push({ source: id, target: linkTargetId, label: relLabel });
-  }
+  // One link per chip — all written to Drive in the single persist() below.
+  addChips.forEach(chip => {
+    data.links.push({ source: id, target: chip.id, label: chip.rel || '', dir: 'none' });
+  });
 
   labelInput.value = '';
-  document.getElementById('node-link-label').value = '';
   persist();
   render();
-  showSaved('Added');
+  showSaved(addChips.length > 0 ? `Added with ${addChips.length} connection${addChips.length > 1 ? 's' : ''}` : 'Added');
   goToAddStep1();
 });
 
+/* ---- Node notes ---- */
 // Typing/speaking here only updates the screen — nothing reaches Drive until "Save changes" is tapped.
 document.getElementById('detail-note').addEventListener('input', (e) => {
   if(!selectedNode) return;
@@ -1008,13 +1540,14 @@ document.getElementById('connect-btn').addEventListener('click', () => {
   const hint = document.getElementById('connect-hint');
   hint.style.display = 'block';
   hint.textContent = `Now tap another node to link with "${selectedNode.label}".`;
+  clearFocus();
   openScreen('graph');
 });
 
 document.getElementById('confirm-link-btn').addEventListener('click', () => {
   if(!linkSource || !linkTarget) return;
   const label = document.getElementById('link-label-input').value.trim();
-  data.links.push({source: linkSource.id, target: linkTarget.id, label});
+  data.links.push({source: linkSource.id, target: linkTarget.id, label, dir: 'none'});
   const targetNode = linkTarget;
   persist();
   render();
@@ -1044,14 +1577,72 @@ document.getElementById('clear-entry-btn').addEventListener('click', () => {
   markDirty();
 });
 
+document.getElementById('delete-node-btn').addEventListener('click', () => {
+  if(!selectedNode) return;
+  deleteSelectedNode();
+});
+document.getElementById('snackbar-undo').addEventListener('click', undoDelete);
+
+/* ---- Focus card ---- */
+document.getElementById('focus-open-btn').addEventListener('click', () => {
+  if(!focusNodeId) return;
+  const d = data.nodes.find(n => n.id === focusNodeId);
+  if(!d) return;
+  const switched = selectNode(d);
+  if(switched !== false) openScreen('node');
+});
+document.getElementById('focus-hops-btn').addEventListener('click', () => {
+  focusHops = focusHops === 1 ? 2 : 1;
+  document.getElementById('focus-hops-btn').textContent = focusHops === 1 ? 'Show 2 hops' : 'Show 1 hop';
+  updateVisibility();
+});
+document.getElementById('focus-close-btn').addEventListener('click', () => {
+  clearFocus();
+  selectedNode = null;
+  updateSelectionStyles();
+});
+
+/* ---- Link bottom sheet ---- */
+document.querySelectorAll('#link-dir-seg button').forEach(b => {
+  b.addEventListener('click', () => setDirSegment(b.dataset.dir));
+});
+document.getElementById('link-sheet-save').addEventListener('click', () => {
+  if(!editingLink) return;
+  editingLink.label = document.getElementById('link-sheet-label').value.trim();
+  editingLink.dir = currentDirSegment();
+  persist();
+  closeLinkSheet();
+  render();
+  showSaved('Connection updated');
+});
+document.getElementById('link-sheet-delete').addEventListener('click', () => {
+  if(!editingLink) return;
+  const ends = linkEndLabels(editingLink);
+  if(!window.confirm(`Delete the connection between "${ends.s}" and "${ends.t}"?`)) return;
+  data.links = data.links.filter(l => l !== editingLink);
+  persist();
+  closeLinkSheet();
+  render();
+  showSaved('Connection deleted');
+});
+document.getElementById('link-sheet-close').addEventListener('click', closeLinkSheet);
+document.getElementById('link-sheet-scrim').addEventListener('click', closeLinkSheet);
+
+/* ---- Home data card ---- */
+document.getElementById('backup-btn').addEventListener('click', downloadBackup);
+
 document.getElementById('reset-btn').addEventListener('click', () => {
   if(!data) return;
   if(isDirty && !window.confirm('You have unsaved changes that will be lost. Reset anyway?')) return;
+  if(!window.confirm('Reset your whole graph back to the starting map? This can\'t be undone.')) return;
   data = seedData();
   selectedNode = null;
   savedSnapshot = null;
   clearDirty();
+  clearFocus();
+  pathHighlight = null;
   activeFilters = new Set();
+  undoStash = null;
   goToAddStep1();
   persist();
   render();
@@ -1062,7 +1653,9 @@ document.querySelectorAll('#legend .legend-chip').forEach(item => {
     const cat = item.dataset.category;
     if(activeFilters.has(cat)) activeFilters.delete(cat);
     else activeFilters.add(cat);
-    updateFilterVisuals();
+    clearFocus();
+    pathHighlight = null;
+    updateVisibility();
   });
 });
 
@@ -1093,4 +1686,7 @@ window.addEventListener('load', () => {
   registerServiceWorker();
   setupSpeechRecognition();
   tryInitTokenClient();
+  renderVocabChips('rel-vocab-add', 'chip-rel-input');
+  renderVocabChips('rel-vocab-confirm', 'link-label-input');
+  renderVocabChips('rel-vocab-sheet', 'link-sheet-label');
 });

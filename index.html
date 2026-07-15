@@ -3,83 +3,149 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#FBF8F4">
+<meta name="theme-color" content="#FCF8FF">
 <title>Memory Graph</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+<!-- ===================== SIGN IN ===================== -->
 <div id="signin-overlay">
+  <div class="signin-mark">✦</div>
   <h2>Memory Graph</h2>
   <p>Your career, projects, skills, and the people in your life — stored as a single file in your own Google Drive. Sign in to load it.</p>
-  <button id="sign-in-btn-main">Sign in with Google</button>
+  <button id="sign-in-btn-main" class="btn-filled">Sign in with Google</button>
   <div id="signin-loading" style="display:none;" class="spinner"></div>
   <div id="signin-error"></div>
 </div>
 
 <div id="app" style="display:none;">
+
+  <!-- ===================== TOP APP BAR ===================== -->
   <header>
-    <div>
-      <h1>Memory Graph</h1>
-      <p>Your career, projects, skills, and the people in your life — one connected map</p>
-    </div>
+    <h1>Memory Graph</h1>
     <div id="auth-area">
       <span id="auth-status"></span>
-      <button class="btn-ghost" id="sign-out-btn" style="display:none;">Sign out</button>
+      <button class="btn-text" id="sign-out-btn" style="display:none;">Sign out</button>
     </div>
   </header>
 
-  <!-- ===================== HOME ===================== -->
+  <!-- ===================== HOME TAB ===================== -->
   <div class="content-wrap">
-    <aside id="home-screen">
-      <div class="section home-actions">
-        <button type="button" class="btn-primary home-tile" id="open-add-btn">➕ Add something</button>
-        <button type="button" class="btn-ghost home-tile" id="open-ask-btn">🔍 Ask your graph</button>
-        <button type="button" class="btn-ghost home-tile" id="open-graph-btn">🕸 View graph</button>
+    <div id="home-screen">
+      <div class="card" id="stats-card">
+        <h2>Your graph</h2>
+        <div id="graph-stats"></div>
       </div>
 
-      <div class="section" id="finance-summary-section" style="display:none;">
+      <div class="card" id="finance-summary-section" style="display:none;">
         <h2>Investment summary</h2>
         <div id="finance-summary"></div>
       </div>
 
-      <div class="section">
-        <button class="btn-ghost" id="reset-btn">Reset to starting map</button>
+      <div class="card">
+        <h2>Your data</h2>
+        <button class="btn-tonal" id="backup-btn">Download a backup</button>
+        <div class="hint">Saves a copy of your graph as a JSON file on this device. Your main copy always lives in your Google Drive.</div>
+        <button class="btn-outlined-danger" id="reset-btn">Reset to starting map</button>
         <div class="hint">This clears everything you've added and can't be undone.</div>
       </div>
-    </aside>
+    </div>
   </div>
 
-  <!-- ===================== ADD SOMETHING ===================== -->
+  <!-- ===================== ASK TAB ===================== -->
+  <div id="ask-screen" class="tab-screen hidden">
+    <div class="tab-body">
+      <div class="card">
+        <h2>Ask your graph</h2>
+        <label>Ask something</label>
+        <input type="text" id="ask-input" placeholder="e.g. who is my wife, what do I know about TANCAM">
+        <button class="btn-filled" id="ask-btn">Search</button>
+        <div class="hint">This searches your own notes and connections directly — it's a smart search, not a chatbot. Try a name, a category, or a relationship word like "wife" or "manager".</div>
+      </div>
+      <div id="ask-results"></div>
+
+      <div class="card">
+        <h2>Find a path</h2>
+        <div class="hint" style="margin-top:0;">See how any two memories connect through your graph.</div>
+        <label>From</label>
+        <select id="path-from"></select>
+        <label>To</label>
+        <select id="path-to"></select>
+        <button class="btn-tonal" id="path-btn">Find path</button>
+        <div id="path-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== GRAPH TAB ===================== -->
+  <div id="graph-overlay" class="tab-screen hidden">
+    <div class="legend-bar-wrap">
+      <div class="legend-bar" id="legend">
+        <div class="legend-chip" data-category="career"><div class="cat-dot cat-career"></div>Career</div>
+        <div class="legend-chip" data-category="project"><div class="cat-dot cat-project"></div>Project</div>
+        <div class="legend-chip" data-category="skill"><div class="cat-dot cat-skill"></div>Skill</div>
+        <div class="legend-chip" data-category="idea"><div class="cat-dot cat-idea"></div>Idea</div>
+        <div class="legend-chip" data-category="personal"><div class="cat-dot cat-personal"></div>Personal</div>
+        <div class="legend-chip" data-category="people"><div class="cat-dot cat-people"></div>People</div>
+        <div class="legend-chip" data-category="finance"><div class="cat-dot cat-finance"></div>Investment</div>
+      </div>
+    </div>
+    <div class="banner" id="connect-hint" style="display:none;">Now tap another node to link it.</div>
+    <div id="graph-wrap">
+      <svg id="graph"></svg>
+
+      <!-- Focus card: appears when a node is tapped on the canvas -->
+      <div id="focus-card" class="hidden">
+        <div class="focus-head">
+          <span class="cat-dot" id="focus-dot"></span>
+          <div>
+            <div id="focus-title"></div>
+            <div id="focus-cat"></div>
+          </div>
+          <button class="icon-btn" id="focus-close-btn" aria-label="Close">✕</button>
+        </div>
+        <div class="focus-actions">
+          <button class="btn-filled" id="focus-open-btn">Open notes</button>
+          <button class="btn-tonal" id="focus-hops-btn">Show 2 hops</button>
+        </div>
+      </div>
+    </div>
+    <div class="hint footer-hint">Drag to rearrange · tap a node to spotlight it · tap a line to edit that connection</div>
+  </div>
+
+  <!-- ===================== ADD (full-screen) ===================== -->
   <div id="add-screen" class="overlay-screen hidden">
     <div class="overlay-topbar">
-      <button type="button" class="btn-ghost overlay-close" id="add-home-btn">‹ Home</button>
-      <div class="overlay-title">Add something</div>
+      <button type="button" class="btn-text overlay-close" id="add-home-btn">‹ Back</button>
+      <div class="overlay-title">Add a memory</div>
     </div>
     <div class="overlay-body">
       <div id="add-step-category">
         <label>Choose a category</label>
         <div class="category-grid" id="category-grid">
-          <button type="button" class="category-card" data-category="career"><span class="seal-dot cat-career"></span>Career</button>
-          <button type="button" class="category-card" data-category="project"><span class="seal-dot cat-project"></span>Project</button>
-          <button type="button" class="category-card" data-category="skill"><span class="seal-dot cat-skill"></span>Skill</button>
-          <button type="button" class="category-card" data-category="idea"><span class="seal-dot cat-idea"></span>Idea / Topic</button>
-          <button type="button" class="category-card" data-category="personal"><span class="seal-dot cat-personal"></span>Personal</button>
-          <button type="button" class="category-card" data-category="people"><span class="seal-dot cat-people"></span>Person / Relationship</button>
-          <button type="button" class="category-card" data-category="finance"><span class="seal-dot cat-finance"></span>Investment</button>
+          <button type="button" class="category-card card-career" data-category="career"><span class="cat-dot cat-career"></span>Career</button>
+          <button type="button" class="category-card card-project" data-category="project"><span class="cat-dot cat-project"></span>Project</button>
+          <button type="button" class="category-card card-skill" data-category="skill"><span class="cat-dot cat-skill"></span>Skill</button>
+          <button type="button" class="category-card card-idea" data-category="idea"><span class="cat-dot cat-idea"></span>Idea / Topic</button>
+          <button type="button" class="category-card card-personal" data-category="personal"><span class="cat-dot cat-personal"></span>Personal</button>
+          <button type="button" class="category-card card-people" data-category="people"><span class="cat-dot cat-people"></span>Person / Relationship</button>
+          <button type="button" class="category-card card-finance" data-category="finance"><span class="cat-dot cat-finance"></span>Investment</button>
         </div>
       </div>
 
       <div id="add-step-details" style="display:none;">
-        <button type="button" class="btn-link add-back-btn" id="add-back-btn">‹ Change category</button>
+        <button type="button" class="btn-text add-back-btn" id="add-back-btn">‹ Change category</button>
         <div class="chosen-category-badge" id="chosen-category-badge"></div>
+
         <label>What is it?</label>
         <input type="text" id="node-label" placeholder="e.g. Kite Connect API">
+
         <div id="finance-fields" style="display:none;">
           <div class="field-row">
             <div>
@@ -92,23 +158,33 @@
             </div>
           </div>
         </div>
+
         <label>Connect to</label>
-        <select id="node-link-target">
-          <option value="">— none —</option>
-        </select>
-        <div id="add-link-relationship-wrap" style="display:none;">
-          <label>Relationship</label>
-          <input type="text" id="node-link-label" placeholder="e.g. wife, daughter, manager">
+        <input type="text" id="connect-search" placeholder="Search your graph…" autocomplete="off">
+        <div id="connect-results" class="hidden"></div>
+        <div id="chip-list"></div>
+
+        <div id="chip-rel-editor" class="hidden">
+          <label id="chip-rel-label">Relationship</label>
+          <input type="text" id="chip-rel-input" placeholder="e.g. wife, manager, built with">
+          <div class="vocab-row" id="rel-vocab-add"></div>
+          <button class="btn-tonal" id="chip-rel-done">Done</button>
         </div>
-        <button class="btn-primary" id="add-node-btn">Save to my graph</button>
+
+        <div id="suggest-row-wrap" class="hidden">
+          <label>Possibly related</label>
+          <div class="vocab-row" id="suggest-row"></div>
+        </div>
+
+        <button class="btn-filled" id="add-node-btn">Save to my graph</button>
       </div>
     </div>
   </div>
 
-  <!-- ===================== NODE NOTES ===================== -->
+  <!-- ===================== NODE NOTES (full-screen) ===================== -->
   <div id="node-screen" class="overlay-screen hidden">
     <div class="overlay-topbar">
-      <button type="button" class="btn-ghost overlay-close" id="node-home-btn">‹ Home</button>
+      <button type="button" class="btn-text overlay-close" id="node-home-btn">‹ Back</button>
       <div class="overlay-title">Notes</div>
     </div>
     <div class="overlay-body">
@@ -137,56 +213,61 @@
         </div>
         <div id="return-badge"></div>
       </div>
-      <button class="btn-primary" id="save-detail-btn">Save changes</button>
+      <button class="btn-filled" id="save-detail-btn">Save changes</button>
       <div class="save-hint" id="detail-dirty-hint"></div>
-      <button class="btn-link" id="connect-btn">Connect to another node</button>
-      <button class="btn-ghost" id="clear-entry-btn">Clear entry</button>
+      <button class="btn-tonal" id="connect-btn">Connect to another node</button>
+      <button class="btn-text" id="clear-entry-btn">Clear entry</button>
+      <button class="btn-outlined-danger" id="delete-node-btn">Delete this memory</button>
       <div id="link-confirm" style="display:none;">
         <label>Relationship (optional)</label>
         <input type="text" id="link-label-input" placeholder="e.g. wife, manager, friend">
-        <button class="btn-primary" id="confirm-link-btn">Add connection</button>
-        <button class="btn-ghost" id="cancel-link-btn">Cancel</button>
+        <div class="vocab-row" id="rel-vocab-confirm"></div>
+        <button class="btn-filled" id="confirm-link-btn">Add connection</button>
+        <button class="btn-text" id="cancel-link-btn">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- ===================== ASK YOUR GRAPH ===================== -->
-  <div id="ask-screen" class="overlay-screen hidden">
-    <div class="overlay-topbar">
-      <button type="button" class="btn-ghost overlay-close" id="ask-home-btn">‹ Home</button>
-      <div class="overlay-title">Ask your graph</div>
+  <!-- ===================== LINK EDIT BOTTOM SHEET ===================== -->
+  <div id="link-sheet-scrim" class="hidden"></div>
+  <div id="link-sheet" class="hidden">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="link-sheet-title"></div>
+    <label>Relationship label</label>
+    <input type="text" id="link-sheet-label" placeholder="e.g. works at, built, knows">
+    <div class="vocab-row" id="rel-vocab-sheet"></div>
+    <label>Direction</label>
+    <div class="segmented" id="link-dir-seg">
+      <button type="button" data-dir="none">No arrow</button>
+      <button type="button" data-dir="st" id="dir-st"></button>
+      <button type="button" data-dir="ts" id="dir-ts"></button>
     </div>
-    <div class="overlay-body">
-      <label>Ask something</label>
-      <input type="text" id="ask-input" placeholder="e.g. who is my wife, what do I know about TANCAM">
-      <button class="btn-primary" id="ask-btn">Search</button>
-      <div class="hint">This searches your own notes and connections directly — it's a smart search, not a chatbot. Try a name, a category, or a relationship word like "wife" or "manager".</div>
-      <div id="ask-results"></div>
-    </div>
+    <button class="btn-filled" id="link-sheet-save">Save connection</button>
+    <button class="btn-outlined-danger" id="link-sheet-delete">Delete connection</button>
+    <button class="btn-text" id="link-sheet-close">Close</button>
   </div>
 
-  <!-- ===================== GRAPH ===================== -->
-  <div id="graph-overlay" class="overlay-screen hidden">
-    <div class="overlay-topbar">
-      <button type="button" class="btn-ghost overlay-close" id="close-graph-btn">‹ Home</button>
-      <div class="legend-bar" id="legend">
-        <div class="legend-chip" data-category="career"><div class="seal-dot cat-career"></div>Career</div>
-        <div class="legend-chip" data-category="project"><div class="seal-dot cat-project"></div>Project</div>
-        <div class="legend-chip" data-category="skill"><div class="seal-dot cat-skill"></div>Skill</div>
-        <div class="legend-chip" data-category="idea"><div class="seal-dot cat-idea"></div>Idea</div>
-        <div class="legend-chip" data-category="personal"><div class="seal-dot cat-personal"></div>Personal</div>
-        <div class="legend-chip" data-category="people"><div class="seal-dot cat-people"></div>People</div>
-        <div class="legend-chip" data-category="finance"><div class="seal-dot cat-finance"></div>Investment</div>
-      </div>
-    </div>
-    <div class="hint" id="connect-hint" style="display:none;">Now tap another node to link it.</div>
-    <div id="graph-wrap">
-      <svg id="graph"></svg>
-    </div>
-    <div class="hint overlay-footer-hint">Drag to rearrange · tap a node for details · tap a chip above to spotlight that thread</div>
-  </div>
+  <!-- ===================== FAB + BOTTOM NAV ===================== -->
+  <button id="fab-add" aria-label="Add a memory">＋</button>
 
+  <nav id="bottom-nav">
+    <button class="nav-item active" id="nav-home">
+      <span class="nav-icon">⌂</span><span>Home</span>
+    </button>
+    <button class="nav-item" id="nav-ask">
+      <span class="nav-icon">🔍</span><span>Ask</span>
+    </button>
+    <button class="nav-item" id="nav-graph">
+      <span class="nav-icon">✦</span><span>Graph</span>
+    </button>
+  </nav>
+
+  <!-- ===================== TOASTS ===================== -->
   <div id="save-indicator">Saved</div>
+  <div id="snackbar" class="hidden">
+    <span id="snackbar-msg"></span>
+    <button id="snackbar-undo">Undo</button>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
