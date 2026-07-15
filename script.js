@@ -114,7 +114,16 @@ let driveFileId = null;
 /* ---------- D3 setup ---------- */
 const svg = d3.select('#graph');
 const wrap = document.getElementById('graph-wrap');
-let width = wrap.clientWidth, height = wrap.clientHeight;
+// When the graph tab is hidden its container reports 0×0. Fall back to the
+// viewport so the very first render() (which runs on Home, before the graph is
+// ever shown) still lays out around a real centre instead of collapsing every
+// node and link into the top-left origin.
+function measureGraph(){
+  const w = wrap.clientWidth || window.innerWidth || 360;
+  const h = wrap.clientHeight || window.innerHeight || 640;
+  return { w, h };
+}
+let width = measureGraph().w, height = measureGraph().h;
 svg.attr('viewBox', [0,0,width,height]);
 
 // Arrowhead marker for directional links. Lives in <defs>, a sibling of the
@@ -143,14 +152,15 @@ let simulation;
    ========================================================== */
 
 function refreshGraphDimensions(){
-  width = wrap.clientWidth;
-  height = wrap.clientHeight;
+  const m = measureGraph();
+  width = m.w;
+  height = m.h;
   svg.attr('viewBox', [0,0,width,height]);
   if(simulation){
     simulation.force('center', d3.forceCenter(width/2, height/2));
     simulation.force('x', d3.forceX(width/2).strength(0.045));
     simulation.force('y', d3.forceY(height/2).strength(0.045));
-    simulation.alpha(0.5).restart();
+    simulation.alpha(0.6).restart();
   }
 }
 
@@ -483,6 +493,19 @@ function linkKey(l){
   return [s, t].sort().join('|');
 }
 
+// Reads a coordinate from a link endpoint. Normally forceLink has replaced the
+// endpoint with its node object, so endpoint.x/.y exist. If it's still a raw id
+// string (unresolved), look the node up by id. Returns a finite number always,
+// so the tick handler can never write NaN into an x1/y1/x2/y2 attribute.
+function coord(endpoint, axis){
+  if(endpoint && typeof endpoint === 'object' && typeof endpoint[axis] === 'number'){
+    return endpoint[axis];
+  }
+  const id = (endpoint && endpoint.id) || endpoint;
+  const node = data.nodes.find(n => n.id === id);
+  return (node && typeof node[axis] === 'number') ? node[axis] : (axis === 'x' ? width/2 : height/2);
+}
+
 function render(){
   g.selectAll('*').remove();
 
@@ -543,22 +566,27 @@ function render(){
 
   simulation.on('tick', () => {
     // Trim each link back from the node centers so arrowheads stay visible
-    // outside the circles instead of hiding underneath them.
+    // outside the circles instead of hiding underneath them. Every endpoint is
+    // read defensively: if forceLink hasn't resolved a source/target into a node
+    // object yet (or a coord is momentarily NaN), fall back to the raw value so
+    // a single unresolved link can never strand the whole set off in a corner.
     linkSel.each(function(d){
-      const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+      const sx0 = coord(d.source, 'x'), sy0 = coord(d.source, 'y');
+      const tx0 = coord(d.target, 'x'), ty0 = coord(d.target, 'y');
+      const dx = tx0 - sx0, dy = ty0 - sy0;
       const len = Math.sqrt(dx*dx + dy*dy) || 1;
       const pad = NODE_R + 3;
-      const sx = d.source.x + (dx/len) * pad, sy = d.source.y + (dy/len) * pad;
-      const tx = d.target.x - (dx/len) * pad, ty = d.target.y - (dy/len) * pad;
-      d3.select(this).attr('x1', sx).attr('y1', sy).attr('x2', tx).attr('y2', ty);
+      d3.select(this)
+        .attr('x1', sx0 + (dx/len) * pad).attr('y1', sy0 + (dy/len) * pad)
+        .attr('x2', tx0 - (dx/len) * pad).attr('y2', ty0 - (dy/len) * pad);
     });
     linkHitSel
-      .attr('x1', d=>d.source.x).attr('y1', d=>d.source.y)
-      .attr('x2', d=>d.target.x).attr('y2', d=>d.target.y);
+      .attr('x1', d=>coord(d.source,'x')).attr('y1', d=>coord(d.source,'y'))
+      .attr('x2', d=>coord(d.target,'x')).attr('y2', d=>coord(d.target,'y'));
     linkLabelSel
-      .attr('x', d => (d.source.x + d.target.x) / 2)
-      .attr('y', d => (d.source.y + d.target.y) / 2 - 5);
-    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+      .attr('x', d => (coord(d.source,'x') + coord(d.target,'x')) / 2)
+      .attr('y', d => (coord(d.source,'y') + coord(d.target,'y')) / 2 - 5);
+    nodeSel.attr('transform', d => `translate(${d.x||0},${d.y||0})`);
   });
 
   updateSelectionStyles();
